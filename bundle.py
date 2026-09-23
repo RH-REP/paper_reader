@@ -6,6 +6,7 @@ Mac → スマホ: paper_reader_<日時>.zip（ZIP。すべて無圧縮で格納
   papers/<id>/meta.json              題名など
   papers/<id>/sentences.json         章と文
   papers/<id>/translation.json       文ごとの日本語訳（作ってあれば）
+  papers/<id>/durations.json         各文の音声の長さ（秒）。プログレスバー用
   papers/<id>/audio/<item>.m4a       1文ずつの音声（章ごとの1本ものは入れない。スマホでも1文ずつ鳴らす）
 
 スマホ → Mac: paper_reader_progress_<日時>.json
@@ -43,6 +44,9 @@ def make_bundle(store, vocab, paper_ids: list[str], out_dir: Path) -> Path:
                        compress_type=zipfile.ZIP_STORED)
             if (d / "translation.json").exists():
                 z.write(d / "translation.json", f"papers/{pid}/translation.json", compress_type=zipfile.ZIP_STORED)
+            st = audio.ensure_durations(d, paper)
+            if st.get("durations"):
+                z.writestr(f"papers/{pid}/durations.json", json.dumps(st["durations"]), compress_type=zipfile.ZIP_STORED)
             if audio.status(d).get("state") == "done":
                 for it in audio.items(paper):
                     f = d / "audio" / f"{it['id']}.m4a"

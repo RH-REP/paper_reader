@@ -294,8 +294,56 @@ function play(items, start = 0) {
   S.pos = start;
   S.playing = true;
   S.paused = false;
+  buildTimeline();
+  $("progRow").hidden = false;
   speakCurrent();
 }
+
+// ---- プログレスバー（今の再生範囲の全体。動かすとその位置へ）----
+// 各文の長さ（audio.json の durations）があれば秒で、無ければ（ブラウザ読み上げの間）何文目かで表す
+const fmt = (s) => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = s % 60;
+  return (h ? `${h}:${String(m).padStart(2, "0")}` : `${m}`) + `:${String(x).padStart(2, "0")}`; };
+function buildTimeline() {
+  const d = S.audio?.state === "done" ? S.audio.durations : null;
+  S.hasDur = !!d && S.items.every((it) => d[it.id] != null);
+  S.offsets = [];
+  let t = 0;
+  for (const it of S.items) { S.offsets.push(t); t += S.hasDur ? d[it.id] : 1; }
+  S.total = t;
+}
+function currentPos() {
+  if (!S.items.length) return 0;
+  return S.hasDur ? S.offsets[S.pos] + Math.min(S.player.currentTime || 0, S.audio.durations[S.items[S.pos].id]) : S.pos;
+}
+function label(v) { return S.hasDur ? fmt(v) : `${Math.min(S.items.length, Math.floor(v) + 1)}文`; }
+function tick() {
+  if (!S.playing || !S.items.length || S.dragging) return;
+  const v = currentPos();
+  $("progress").value = S.total ? Math.round((v / S.total) * 1000) : 0;
+  $("tCur").textContent = label(v);
+  $("tTot").textContent = S.hasDur ? fmt(S.total) : `${S.items.length}文`;
+}
+function seekTo(frac) {
+  if (!S.playing) return;
+  const t = Math.max(0, Math.min(S.total - 0.01, frac * S.total));
+  let i = S.offsets.length - 1;
+  while (i > 0 && S.offsets[i] > t) i--;
+  const at = S.hasDur ? t - S.offsets[i] : 0;
+  if (i === S.pos && S.hasDur && S.player.src) { S.player.currentTime = at; return; }
+  S.pos = i;
+  S.paused = false;
+  speakCurrent({ at });
+}
+setInterval(tick, 250);
+$("progress").addEventListener("input", () => {
+  S.dragging = true;
+  $("tCur").textContent = label((Number($("progress").value) / 1000) * S.total);
+});
+$("progress").addEventListener("change", () => {
+  S.dragging = false;
+  seekTo(Number($("progress").value) / 1000);
+  $("progress").blur();
+});
 
 function haltOutput() {
   S.player.pause();
@@ -389,6 +437,7 @@ function stop() {
   status("停止中");
   $("pause").textContent = "⏸";
   $("nowText").hidden = true;
+  $("progRow").hidden = true;
 }
 
 function showProgress() {

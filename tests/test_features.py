@@ -122,6 +122,16 @@ class AudioTest(unittest.TestCase):
             info = subprocess.run(["afinfo", str(d / "export" / "03_2_REQUIREMENTS.m4a")], capture_output=True, text=True).stdout
             self.assertIn("aac", info)
             self.assertEqual(audio.status(d)["state"], "done")
+            # 各文の長さ（プログレスバー用）。作るときに記録し、無ければ m4a から測って書き足す
+            durs = audio.status(d)["durations"]
+            self.assertEqual(set(durs), {it["id"] for it in its})
+            self.assertTrue(all(v > 0.2 for v in durs.values()))
+            st = audio.status(d)
+            del st["durations"]
+            audio._write_status(d, st)
+            back = audio.ensure_durations(d, paper)["durations"]
+            for k, v in durs.items():
+                self.assertAlmostEqual(back[k], v, delta=0.1)          # m4a から測った長さも WAV とほぼ同じ
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

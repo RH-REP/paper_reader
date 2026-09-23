@@ -2,7 +2,7 @@
 
   data/papers/<id>/audio/<sid>_h.m4a      章見出し（"Section 2. Design Drivers."）
   data/papers/<id>/audio/<sid>_<k>.m4a    章の k 文目（1始まり。引用を除いた読み上げ用の文）
-  data/papers/<id>/audio/audio.json       作成の状態（state, voice, rate, total, done, ...）
+  data/papers/<id>/audio/audio.json       作成の状態（state, voice, rate, total, done, durations = {音声id: 秒}, ...）
   data/papers/<id>/export/NN_<章>.m4a      スマホに持ち出す用。章（節を含む）を1本にしたもの。後付けは作らない
   data/papers/<id>/export/00_all.m4a      本文全体を1本にしたもの
 
@@ -88,6 +88,28 @@ def _concat(wavs: list[tuple[Path, float]], out: Path):
             w.writeframes(b"\x00\x00" * int(RATE_HZ * gap))
 
 
+def _wav_seconds(p: Path) -> float:
+    with wave.open(str(p), "rb") as r:
+        return round(r.getnframes() / r.getframerate(), 3)
+
+
+def _m4a_seconds(p: Path) -> float:
+    out = subprocess.run(["afinfo", str(p)], capture_output=True, text=True).stdout
+    m = re.search(r"estimated duration:\s*([\d.]+)", out)
+    return round(float(m.group(1)), 3) if m else 0.0
+
+
+def ensure_durations(paper_dir: Path, paper: dict) -> dict:
+    """各文の長さが audio.json に無ければ（この機能より前に作った音声）、m4a を測って書き足す。"""
+    st = status(paper_dir)
+    if st.get("state") != "done" or st.get("durations"):
+        return st
+    st["durations"] = {it["id"]: _m4a_seconds(paper_dir / "audio" / f"{it['id']}.m4a")
+                       for it in items(paper) if (paper_dir / "audio" / f"{it['id']}.m4a").exists()}
+    _write_status(paper_dir, st)
+    return st
+
+
 def _slug(title: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "_", title).strip("_")[:60] or "section"
 
@@ -151,6 +173,7 @@ def generate(paper_dir: Path, paper: dict, voice: str | None = None, rate: int =
                     if on_progress:
                         on_progress(st["done"], st["total"])
 
+        st["durations"] = {it["id"]: _wav_seconds(work / f"{it['id']}.wav") for it in its}   # プログレスバー用
         by_sec: dict[str, list] = {}
         for it in its:
             gap = GAP_AFTER_HEADING if it["heading"] else GAP_AFTER_SENTENCE

@@ -43,6 +43,9 @@ button:disabled{opacity:.5;cursor:default}
 .opts{gap:16px;font-size:13px;color:var(--ink2)}
 .opts select{font:inherit;max-width:240px}
 .status{font-size:13px;color:var(--ink2);margin-left:6px}
+.prog{display:flex;align-items:center;gap:10px;margin:6px 0 2px}
+.prog input{flex:1;accent-color:var(--accent)}
+.prog .t{font:12px ui-monospace,Menlo,monospace;color:var(--ink2);min-width:3.6em;text-align:center}
 .now{margin:6px 0;padding:8px 12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;font-size:15px}
 .sections{list-style:none;margin:0;padding:0}
 .sec{border-bottom:1px solid var(--line)}

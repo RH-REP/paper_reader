@@ -251,7 +251,8 @@ class Handler(SimpleHTTPRequestHandler):
             app.start_audio(m.group(1))                  # 無い・古いときだけ始まる
             app.start_translate(m.group(1))
             tr = translate.status(d)
-            return self._json({**paper, "audio": audio.status(d), "ja": tr.pop("items", {}), "translation": tr})
+            return self._json({**paper, "audio": audio.ensure_durations(d, paper), "ja": tr.pop("items", {}),
+                               "translation": tr})
         m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/translation", path)
         if m:
             d = self._paper_dir(m.group(1))

@@ -5,7 +5,7 @@ import { lookup } from "./lookup.js";
 import * as srs from "./srs.js";
 import { unzipStored, text } from "./zip.js";
 
-const VERSION = "5";
+const VERSION = "6";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
@@ -152,9 +152,52 @@ function play(items, start = 0) {
   stop();
   if (!items.length) return;
   Object.assign(S, { items, pos: start, playing: true, paused: false });
+  buildTimeline();
   $("player").hidden = false;
   speakCurrent();
 }
+
+// ---- プログレスバー（今の再生範囲の全体。動かすとその位置へ）----
+// 各文の長さ（Mac から来た durations）があれば秒で、無ければ何文目かで表す
+const fmt = (s) => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = s % 60;
+  return (h ? `${h}:${String(m).padStart(2, "0")}` : `${m}`) + `:${String(x).padStart(2, "0")}`; };
+function buildTimeline() {
+  const d = S.paper?.durations;
+  S.hasDur = !!d && S.items.every((it) => d[it.id] != null);
+  S.offsets = [];
+  let t = 0;
+  for (const it of S.items) { S.offsets.push(t); t += S.hasDur ? d[it.id] : 1; }
+  S.total = t;
+}
+function currentPos() {
+  if (!S.items.length) return 0;
+  return S.hasDur ? S.offsets[S.pos] + Math.min(S.player.currentTime || 0, S.paper.durations[S.items[S.pos].id]) : S.pos;
+}
+function label(v) { return S.hasDur ? fmt(v) : `${Math.min(S.items.length, Math.floor(v) + 1)}文`; }
+function tick() {
+  if (!S.playing || !S.items.length || S.dragging) return;
+  const v = currentPos();
+  $("progress").value = S.total ? Math.round((v / S.total) * 1000) : 0;
+  $("tCur").textContent = label(v);
+  $("tTot").textContent = S.hasDur ? fmt(S.total) : `${S.items.length}文`;
+}
+function seekTo(frac) {
+  if (!S.playing) return;
+  const t = Math.max(0, Math.min(S.total - 0.01, frac * S.total));
+  let i = S.offsets.length - 1;
+  while (i > 0 && S.offsets[i] > t) i--;
+  const at = S.hasDur ? t - S.offsets[i] : 0;
+  if (i === S.pos && S.hasDur && S.player.src) { S.player.currentTime = at; return; }
+  S.pos = i;
+  S.paused = false;
+  speakCurrent({ at });
+}
+setInterval(tick, 250);
+$("progress").addEventListener("input", () => {
+  S.dragging = true;
+  $("tCur").textContent = label((Number($("progress").value) / 1000) * S.total);
+});
+$("progress").addEventListener("change", () => { S.dragging = false; seekTo(Number($("progress").value) / 1000); });
 
 function halt() {
   S.player.pause();
@@ -446,7 +489,9 @@ async function importBundle(file) {
     const paper = JSON.parse(text(files.get(`papers/${pid}/sentences.json`)));
     const tr = files.get(`papers/${pid}/translation.json`);
     const ja = tr ? JSON.parse(text(tr)).items || {} : {};          // 文ごとの日本語訳（Mac で作ったもの）
-    const entries = [["papers", pid, { id: pid, meta, paper, ja }]];
+    const du = files.get(`papers/${pid}/durations.json`);
+    const durations = du ? JSON.parse(text(du)) : null;              // 各文の音声の長さ（プログレスバー用）
+    const entries = [["papers", pid, { id: pid, meta, paper, ja, durations }]];
     for (const [name, bytes] of files) {
       const m = name.match(/^papers\/([0-9a-f]{8})\/audio\/([A-Za-z0-9_]+)\.m4a$/);
       if (m && m[1] === pid) { entries.push(["audio", `${pid}/${m[2]}`, new Blob([bytes], { type: "audio/mp4" })]); nAudio++; }

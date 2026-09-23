@@ -131,6 +131,11 @@
           <button id="stop" title="停止">■</button>
           <span id="status" class="status">停止中</span>
         </div>
+        <div id="progRow" class="prog" hidden>
+          <span id="tCur" class="t">0:00</span>
+          <input type="range" id="progress" min="0" max="1000" step="1" value="0" aria-label="再生位置（動かすとその位置へ）">
+          <span id="tTot" class="t">0:00</span>
+        </div>
         <p id="nowText" class="now" hidden></p>
         <div class="row opts">
           <label>再生速度 <input type="range" id="speed" min="0.7" max="2" step="0.05" value="1"> <span id="speedVal">1.00</span>×</label>
