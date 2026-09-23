@@ -1,0 +1,7 @@
+# app/ へ複製しないもの（rsync --exclude 形式）。利用データとマシン固有の設定は app/learning/paper_reader/ 側が正本
+config.json
+server.log
+/data/
+/backup/
+/tests/
+/samples/sample_scan.pdf

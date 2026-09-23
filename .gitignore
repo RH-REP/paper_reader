@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+config.json
+server.log
+data/
+backup/
+samples/sample_scan.pdf

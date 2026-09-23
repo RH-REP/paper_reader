@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>paper_reader</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<header class="bar">
+  <h1>paper_reader</h1>
+  <label class="btn" id="importLabel">PDF を取り込む<input type="file" id="importInput" accept="application/pdf,.pdf" multiple hidden></label>
+  <span id="importMsg" class="muted"></span>
+</header>
+
+<div class="layout">
+  <aside class="papers">
+    <h2>論文</h2>
+    <ul id="paperList"></ul>
+    <p id="paperEmpty" class="muted" hidden>まだありません。上の「PDF を取り込む」から入れるか、この画面に PDF をドラッグしてください。</p>
+  </aside>
+
+  <main id="main">
+    <p id="placeholder" class="muted">左の一覧から論文を選んでください。</p>
+    <section id="paper" hidden>
+      <h2 id="paperTitle"></h2>
+      <p id="paperMeta" class="muted"></p>
+
+      <div class="player">
+        <div class="row">
+          <button id="playAll" class="primary">▶ 全体を読む</button>
+          <button id="prev" title="前の文">⏮</button>
+          <button id="pause" title="一時停止／再開（スペース）">⏸</button>
+          <button id="next" title="次の文">⏭</button>
+          <button id="stop" title="停止">■</button>
+          <span id="status" class="status">停止中</span>
+        </div>
+        <div class="row opts">
+          <label>声 <select id="voice"></select></label>
+          <label>速さ <input type="range" id="rate" min="0.6" max="1.6" step="0.05" value="1"> <span id="rateVal">1.00</span></label>
+          <label><input type="checkbox" id="skipCites" checked> 引用 (Smith et al., 2020) を読まない</label>
+          <label><input type="checkbox" id="skipBack" checked> 後付け（References など）を「全体」で読まない</label>
+        </div>
+      </div>
+
+      <ol id="sections" class="sections"></ol>
+    </section>
+  </main>
+</div>
+
+<div id="drop" class="drop" hidden>ここに PDF を落とすと取り込みます</div>
+<script src="assets/app.js"></script>
+</body>
+</html>
