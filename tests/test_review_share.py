@@ -141,6 +141,12 @@ class BundleShareTest(unittest.TestCase):
         z2 = bundle.make_bundle(self.store, self.v, [], self.tmp / "share")
         self.assertEqual([p.name for p in (self.tmp / "share").glob("*.zip")], [z2.name])
 
+    def test_qr_is_regular_qr_and_scalable(self):
+        svg = share.qr_svg("https://rh-rep.github.io/paper_reader/")
+        size = int(svg.split('viewBox="0 0 ')[1].split(" ")[0])
+        self.assertGreaterEqual(size, 21 + 4)                   # 通常の QR（21 マス以上＋余白）。Micro QR ではない
+        self.assertNotIn('width="', svg.split(">")[0])
+
     def test_share_page_token_and_upload(self):
         if not share.lan_ip():
             self.skipTest("LAN のアドレスが無い")
@@ -150,6 +156,8 @@ class BundleShareTest(unittest.TestCase):
         try:
             info = srv.start(z, "https://example.invalid/pwa/")
             self.assertIn("<svg", info["qr"])
+            self.assertIn("viewBox", info["qr"])                    # 枠に合わせて縮む（端が切れない）
+            self.assertNotIn('width="', info["qr"].split(">")[0])
             page = urllib.request.urlopen(info["url"], timeout=5).read().decode()
             self.assertIn("paper_reader 受け渡し", page)
             self.assertEqual(urllib.request.urlopen(info["url"] + "bundle.zip", timeout=5).read(), z.read_bytes())

@@ -107,7 +107,7 @@ button.wide{width:100%;padding:12px;font-size:16px}
 .panel h3{margin:0 0 8px;font-size:15.5px}
 .panel ol{padding-left:20px;margin:6px 0}
 .qrrow{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
-.qr svg{width:150px;height:150px;display:block;background:#fff;border-radius:6px}
+.qr svg{width:180px;height:180px;display:block;background:#fff;border-radius:6px}
 .checks{list-style:none;padding:0;margin:4px 0}
 .checks li{font-size:14px;padding:2px 0}
 .sharebox{border:2px solid var(--accent);border-radius:10px;padding:10px 12px;margin:8px 0}

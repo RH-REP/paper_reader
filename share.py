@@ -45,7 +45,9 @@ def lan_ip() -> str | None:
 
 def qr_svg(text: str) -> str:
     buf = io.BytesIO()
-    segno.make(text, error="m").save(buf, kind="svg", scale=5, border=2, dark="#000", light="#fff", xmldecl=False)
+    # omitsize: 幅・高さを書かず viewBox だけにする（表示の枠に合わせて縮み、端が切れない）
+    # make_qr: 短い文字列でも Micro QR にしない（スマホのカメラで読めないことがある）
+    segno.make_qr(text, error="m").save(buf, kind="svg", border=2, dark="#000", light="#fff", xmldecl=False, omitsize=True)
     return buf.getvalue().decode("utf-8")
 
 

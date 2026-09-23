@@ -521,13 +521,17 @@ $("revSay").onclick = () => S.review?.card && playOnce(`/api/word_audio?w=${enco
 
 // ---- スマホ（Android）----
 async function loadPhone() {
-  const url = S.cfg?.pwa_url || "";
+  // 起動直後にこのタブが開いていても、設定（URL）と論文の一覧を読んでから作る
+  if (!S.cfg) await loadConfig();
+  if (!S.papers.length) S.papers = await api("/api/papers");
+  const url = S.cfg.pwa_url;
   $("pwaLink").href = url;
   $("pwaLink").textContent = url;
   $("pwaQr").innerHTML = await (await fetch(`/api/qr?t=${encodeURIComponent(url)}`)).text();
   const ul = $("sharePapers");
   ul.innerHTML = "";
-  const want = new Set(pref.get("sharePapers", S.paper ? [S.paper.id] : []));
+  const saved = pref.get("sharePapers", null);
+  const want = new Set(saved && saved.length ? saved : S.papers.map((m) => m.id));   // 初めては全部に印を付ける
   for (const m of S.papers) {
     const li = document.createElement("li");
     li.innerHTML = `<label><input type="checkbox" value="${m.id}"> <span></span></label>`;
@@ -544,6 +548,7 @@ function updateBundleLink() {
   const ids = sharePicked();
   pref.set("sharePapers", ids);
   $("bundleLink").href = `/api/bundle?papers=${ids.join(",")}`;
+  $("bundleLink").onclick = (e) => { if (!ids.length) { e.preventDefault(); alert("送る論文に印を付けてください"); } };
 }
 function renderShare(st) {
   clearInterval(S.sharePoll);
@@ -561,6 +566,7 @@ function renderShare(st) {
   }, 3000);
 }
 $("shareStart").onclick = async () => {
+  if (!sharePicked().length) { alert("送る論文に印を付けてください"); return; }
   $("shareStart").disabled = true;
   try { renderShare(await post("/api/share/start", { papers: sharePicked() })); }
   catch (e) { alert(e.message); }
