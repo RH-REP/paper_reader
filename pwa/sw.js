@@ -1,7 +1,7 @@
 // オフラインで動かすための Service Worker。
 // 画面のファイルは入れたときにまとめて保存し、辞書（dict/*.json）は一度読んだら保存する。
 // 画面を直したら CACHE の版を上げる（古い保存は消える）。
-const CACHE = "paper_reader-v1";
+const CACHE = "paper_reader-v3";
 const SHELL = ["./", "index.html", "app.css", "manifest.webmanifest", "js/app.js", "js/db.js", "js/lookup.js",
                "js/srs.js", "js/zip.js", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png"];
 

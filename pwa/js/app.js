@@ -5,7 +5,7 @@ import { lookup } from "./lookup.js";
 import * as srs from "./srs.js";
 import { unzipStored, text } from "./zip.js";
 
-const VERSION = "1";
+const VERSION = "3";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
@@ -98,7 +98,22 @@ async function openPaper(id) {
       const sum = document.createElement("summary");
       sum.textContent = "文を見る（単語をタップで辞書）";
       const list = document.createElement("ol");
-      for (const s of sec.sentences) { const x = document.createElement("li"); fillWords(x, s.t); list.appendChild(x); }
+      sec.sentences.forEach((s, k) => {
+        const x = document.createElement("li");
+        x.dataset.t = s.t;                             // 辞書に渡す文（▶ の文字を混ぜない）
+        if (s.s) {
+          const b = document.createElement("button");
+          b.className = "sp";
+          b.textContent = "▶";
+          b.title = "この文だけ再生";
+          b.onclick = () => play([sentenceItem(sec, k)]);
+          x.appendChild(b);
+        }
+        const t = document.createElement("span");
+        fillWords(t, s.t);
+        x.appendChild(t);
+        list.appendChild(x);
+      });
       det.append(sum, list);
       li.appendChild(det);
     }
@@ -126,6 +141,11 @@ function itemsFor(secId) {
   return items;
 }
 
+function sentenceItem(sec, k) {
+  const s = sec.sentences[k];
+  return { id: `${sec.id}_${k + 1}`, sec, n: k + 1, text: s.s, show: s.t };
+}
+
 function play(items, start = 0) {
   stop();
   if (!items.length) return;
@@ -143,7 +163,8 @@ function halt() {
 
 function advance(g) { if (g !== S.gen || S.paused) return; S.pos++; speakCurrent(); }
 
-async function speakCurrent() {
+// at: その文の何秒目から、fromEnd: 文の終わりの何秒前から（5秒・10秒戻す・進めるで文をまたぐとき）
+async function speakCurrent(opts = {}) {
   const g = ++S.gen;
   halt();
   if (S.pos >= S.items.length) { S.playing = false; $("status").textContent = "読み終わりました"; setMedia(); return; }
@@ -158,6 +179,10 @@ async function speakCurrent() {
     p.playbackRate = parseFloat($("speed").value);
     p.onended = () => advance(g);
     p.onerror = () => advance(g);
+    p.onloadedmetadata = () => {
+      if (opts.at) p.currentTime = Math.min(opts.at, p.duration);
+      else if (opts.fromEnd) p.currentTime = Math.max(0, p.duration - opts.fromEnd);
+    };
     p.play().catch((e) => { if (g === S.gen) $("status").textContent = "再生できませんでした: " + e.message; });
   } else if ("speechSynthesis" in window) {
     const u = new SpeechSynthesisUtterance(it.text);
@@ -177,6 +202,24 @@ function pauseResume() {
   showProgress();
   setMedia();
 }
+// 5秒・10秒戻す・進める。文の頭・終わりを越えたら前後の文へ続ける（音声ファイルで再生しているときだけ）
+function seekBy(sec) {
+  const p = S.player;
+  if (!S.playing || !p.src) return;
+  const t = p.currentTime + sec;
+  if (t < 0) {
+    if (S.pos === 0) { p.currentTime = 0; return; }
+    S.pos--; S.paused = false;
+    speakCurrent({ fromEnd: -t });
+  } else if (isFinite(p.duration) && t >= p.duration) {
+    if (S.pos >= S.items.length - 1) { p.currentTime = Math.max(0, p.duration - 0.05); return; }
+    S.pos++; S.paused = false;
+    speakCurrent({ at: t - p.duration });
+  } else {
+    p.currentTime = t;
+  }
+}
+
 function step(d) { if (!S.playing) return; S.pos = Math.max(0, Math.min(S.items.length - 1, S.pos + d)); S.paused = false; speakCurrent(); }
 function stop() {
   S.gen++;
@@ -206,10 +249,13 @@ if ("mediaSession" in navigator) {
   navigator.mediaSession.setActionHandler("pause", () => !S.paused && pauseResume());
   navigator.mediaSession.setActionHandler("nexttrack", () => step(1));
   navigator.mediaSession.setActionHandler("previoustrack", () => step(-1));
+  navigator.mediaSession.setActionHandler("seekbackward", (d) => seekBy(-(d.seekOffset || 10)));   // ロック画面の戻す・進める
+  navigator.mediaSession.setActionHandler("seekforward", (d) => seekBy(d.seekOffset || 10));
 }
 $("playAll").onclick = () => S.paper && play(itemsFor(null));
 $("pause").onclick = pauseResume;
 $("prev").onclick = () => step(-1);
+document.querySelectorAll("[data-seek]").forEach((b) => (b.onclick = () => seekBy(Number(b.dataset.seek))));
 $("next").onclick = () => step(1);
 $("stop").onclick = stop;
 $("speed").oninput = () => {
@@ -246,7 +292,7 @@ async function recordLookup(r, ctx) {
   refreshBadge();
 }
 
-function showWord(r) {
+function showWord(r, ctx = {}) {
   $("sheet").hidden = false;
   $("wcWord").textContent = r.found ? r.headword : r.normalized || r.query;
   $("wcNote").textContent = r.found && r.note ? `${r.note}（${r.query}）` : "";
@@ -257,7 +303,16 @@ function showWord(r) {
   } else {
     box.textContent = navigator.onLine ? "辞書に見つかりませんでした。" : "辞書に見つかりませんでした（オフライン）。";
   }
-  $("wcSource").textContent = r.found ? `${r.source || ""}${r.saved ? " ・ 単語帳に保存" : ""}` : "";
+  $("wcSource").textContent = r.found ? r.source || "" : "";
+  const reg = $("wcRegister");
+  reg.hidden = !r.found;
+  reg.disabled = !!r.registered;
+  reg.textContent = r.registered ? "登録済み ✓" : "単語帳に登録";
+  reg.onclick = async () => {                       // 「調べる」→「登録」の2段階。押したときだけ単語帳に入れる
+    await recordLookup(r, ctx);
+    showWord({ ...r, registered: true }, ctx);
+    if (S.view === "words") loadWords();
+  };
   $("wcWeblio").href = r.weblio || `https://ejje.weblio.jp/content/${encodeURIComponent(r.headword || r.query)}`;
   $("wcSay").onclick = () => sayWord(r.found ? r.headword : r.normalized);
 }
@@ -272,9 +327,8 @@ function sayWord(w) {
 
 async function lookupAndShow(word, ctx = {}) {
   const r = await lookup(word);
-  if (r.found) { await recordLookup(r, ctx); r.saved = true; }
-  showWord(r);
-  if (S.view === "words") loadWords();
+  if (r.found) r.registered = !!(await db.get("words", r.headword));
+  showWord(r, ctx);
 }
 
 document.addEventListener("click", (e) => {
@@ -284,7 +338,7 @@ document.addEventListener("click", (e) => {
   w.classList.add("hit");
   const secEl = w.closest("[data-sec]");
   const sec = S.paper?.paper.sections.find((s) => s.id === secEl?.dataset.sec);
-  lookupAndShow(w.textContent, { section: sec?.title, sentence: w.closest("li, .now")?.textContent });
+  lookupAndShow(w.textContent, { section: sec?.title, sentence: w.closest("[data-t]")?.dataset.t || w.closest(".now")?.textContent });
 });
 $("sheetClose").onclick = () => { $("sheet").hidden = true; };
 $("searchForm").onsubmit = (e) => { e.preventDefault(); const w = $("searchInput").value.trim(); if (w) lookupAndShow(w); };
@@ -305,7 +359,7 @@ async function loadWords() {
     m.textContent = w.meaning.split(/[\n/]/)[0];
     li.append(b, m);
     li.onclick = () => showWord({ found: true, headword: w.headword, query: w.headword, source: w.source,
-      entries: w.meaning.split("\n").map((mean) => ({ word: w.headword, mean })) });
+      entries: w.meaning.split("\n").map((mean) => ({ word: w.headword, mean })), registered: true });
     ul.appendChild(li);
   }
 }
@@ -329,7 +383,7 @@ async function loadReview() {
   $("revActions").hidden = !card;
   $("revDone").hidden = !!card;
   if (!card) {
-    $("revDone").textContent = c.total === 0 ? "単語帳が空です。論文の文の中の単語をタップするか、Mac のデータを読み込んでください。"
+    $("revDone").textContent = c.total === 0 ? "単語帳が空です。論文の文の中の単語をタップして「単語帳に登録」を押すか、Mac のデータを読み込んでください。"
       : `今の分は終わりです。${q.next_due ? `次は ${q.next_due.toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} に出ます。` : ""}`;
     return;
   }

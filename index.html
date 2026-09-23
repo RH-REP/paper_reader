@@ -26,7 +26,7 @@
     <p id="paperEmpty" class="muted" hidden>まだありません。上の「PDF を取り込む」から入れるか、この画面に PDF をドラッグしてください。</p>
     <h2>単語帳 <span id="vocabCount" class="muted"></span></h2>
     <ul id="vocabList" class="list vocab"></ul>
-    <p id="vocabEmpty" class="muted" hidden>文の中の単語をクリックすると、引いた単語がここに貯まります。</p>
+    <p id="vocabEmpty" class="muted" hidden>文の中の単語をクリックして辞書を出し、「単語帳に登録」を押すとここに入ります。</p>
   </aside>
 
   <main id="main">
@@ -56,7 +56,7 @@
       <p class="muted"><button id="revUndo" class="small">↶ 1つ前の答えを取り消す <kbd>Z</kbd></button></p>
       <details class="howto"><summary>復習のしかた</summary>
         <ol>
-          <li>単語と、それを引いた論文の文が出ます。意味を思い出してから「答えを見る」（スペース）。</li>
+          <li>単語と、それを登録した論文の文が出ます。意味を思い出してから「答えを見る」（スペース）。</li>
           <li>思い出せた度合いで4つから選びます。ボタンの下の時間は、次にその単語が出るまでの間隔です。
             <ul><li><b>もう一度</b>: 思い出せなかった（すぐにまた出る）</li>
                 <li><b>難しい</b>: なんとか思い出した</li>
@@ -121,7 +121,11 @@
         <div class="row">
           <button id="playAll" class="primary">▶ 全体を読む</button>
           <button id="prev" title="前の文">⏮</button>
+          <button data-seek="-10" class="seek" title="10秒戻す（Shift+←）">−10秒</button>
+          <button data-seek="-5" class="seek" title="5秒戻す（←）">−5秒</button>
           <button id="pause" title="一時停止／再開（スペース）">⏸</button>
+          <button data-seek="5" class="seek" title="5秒進める（→）">+5秒</button>
+          <button data-seek="10" class="seek" title="10秒進める（Shift+→）">+10秒</button>
           <button id="next" title="次の文">⏭</button>
           <button id="stop" title="停止">■</button>
           <span id="status" class="status">停止中</span>
@@ -146,6 +150,7 @@
   <div class="wc-head"><b id="wcWord"></b> <span id="wcNote" class="tag"></span>
     <button id="wcSay" class="small" title="発音">🔈</button></div>
   <div id="wcMeans" class="wc-means"></div>
+  <button id="wcRegister" class="primary wide-sm" hidden>単語帳に登録</button>
   <div class="wc-foot muted"><span id="wcSource"></span> <a id="wcWeblio" target="_blank" rel="noopener">Weblio で見る ↗</a></div>
 </aside>
 

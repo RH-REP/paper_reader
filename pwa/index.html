@@ -56,7 +56,7 @@
     <form id="searchForm" class="search"><input id="searchInput" type="search" placeholder="英単語を引く" autocomplete="off" autocapitalize="off" spellcheck="false"></form>
     <h2>単語帳 <span id="wordCount" class="muted"></span></h2>
     <ul id="wordList" class="list words"></ul>
-    <p id="wordEmpty" class="empty" hidden>論文の文の中の単語をタップすると、ここに貯まります。</p>
+    <p id="wordEmpty" class="empty" hidden>論文の文の中の単語をタップして辞書を出し、「単語帳に登録」を押すとここに入ります。</p>
   </section>
 
   <!-- データ -->
@@ -100,9 +100,10 @@
     <p class="muted">Wi‑Fi が使えないときは、Mac の「ファイルで渡す」で zip を保存し、Google Drive や USB でスマホに移してから同じように選びます。</p>
     <h3>3. 聞く</h3>
     <ul>
-      <li>「読む」で論文を選び、章の ▶ でその章、「全体を読む」で最初から。下の再生バーで一時停止・前後の文・速さ。</li>
+      <li>「読む」で論文を選び、章の ▶ でその章、「全体を読む」で最初から。「文を見る」を開くと、各文の ▶ でその1文だけ再生できます。</li>
+      <li>下の再生バー: −10 / −5 / +5 / +10 で秒単位に戻す・進める（文をまたいでも続きます）、⏮ ⏭ で前後の文、右で速さ。</li>
       <li>画面を消しても続きます。ロック画面や通知から一時停止・次の文へ進めます。</li>
-      <li>文の中の単語をタップすると辞書が出て、単語帳に入ります。</li>
+      <li>文の中の単語をタップすると辞書が出ます。覚えたい単語は「<b>単語帳に登録</b>」を押すと単語帳に入り、復習に出ます。</li>
     </ul>
     <h3>4. 復習する</h3>
     <ul>
@@ -129,9 +130,15 @@
   <p id="nowText" class="now"></p>
   <div class="prow">
     <button id="prev" class="icon" title="前の文">⏮</button>
+    <button data-seek="-10" class="seek">−10</button>
+    <button data-seek="-5" class="seek">−5</button>
     <button id="pause" class="icon big" title="一時停止／再開">⏸</button>
+    <button data-seek="5" class="seek">+5</button>
+    <button data-seek="10" class="seek">+10</button>
     <button id="next" class="icon" title="次の文">⏭</button>
     <button id="stop" class="icon" title="停止">■</button>
+  </div>
+  <div class="prow"><span class="muted small">秒で戻す・進める ・ ⏮⏭ は前後の文</span>
     <label class="speed"><input type="range" id="speed" min="0.7" max="2" step="0.05" value="1"><span id="speedVal">1.00×</span></label>
   </div>
   <p id="status" class="muted small"></p>
@@ -142,6 +149,7 @@
   <div class="sheet-head"><b id="wcWord"></b> <span id="wcNote" class="tag"></span>
     <button id="wcSay" class="icon" title="発音">🔈</button><button id="sheetClose" class="icon close">×</button></div>
   <div id="wcMeans" class="means"></div>
+  <button id="wcRegister" class="primary wide-sm" hidden>単語帳に登録</button>
   <p class="muted small"><span id="wcSource"></span> <a id="wcWeblio" target="_blank" rel="noopener">Weblio ↗</a></p>
 </div>
 

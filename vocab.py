@@ -1,4 +1,4 @@
-"""単語帳（<data_root>/vocab.sqlite）。引いた単語を自動で入れ、FSRS で復習する。
+"""単語帳（<data_root>/vocab.sqlite）。辞書で引いた語のうち「登録」したものを入れ、FSRS で復習する。
 
   words     見出し語ごとに1行。意味・出典・最初に引いた日時・引いた回数・復習の状態（card は reviews から計算した結果）
   lookups   引いた記録。どの論文のどの文で引いたか（audio_ref = "<論文id>/<音声id>" があればその文の音声が鳴らせる）
@@ -81,7 +81,7 @@ class Vocab:
                            (head, meaning, source, when, when)).lastrowid
 
     def record(self, result: dict, paper_id=None, section=None, sentence=None, audio_ref=None) -> int | None:
-        """辞書で見つかった単語を保存する。同じ見出し語は1行にまとめ、引いた回数を増やす。"""
+        """辞書で見つかった単語を登録する。同じ見出し語は1行にまとめ、登録した回数と例文を増やす。"""
         if not result.get("found"):
             return None
         now = _now_local()
@@ -92,6 +92,10 @@ class Vocab:
                         "VALUES (?,?,?,?,?,?,?,?)",
                         (wid, result["query"], paper_id, section, sentence, now, uuid.uuid4().hex, audio_ref))
         return wid
+
+    def has(self, head: str) -> bool:
+        with self._con() as con:
+            return con.execute("SELECT 1 FROM words WHERE headword = ?", (head,)).fetchone() is not None
 
     def list(self, limit: int = 500) -> list[dict]:
         with self._con() as con:

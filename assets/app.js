@@ -135,11 +135,22 @@ function renderSections() {
       const sum = document.createElement("summary");
       sum.textContent = "文を見る（単語をクリックで辞書）";
       const list = document.createElement("ol");
-      for (const s of sec.sentences) {
+      sec.sentences.forEach((s, k) => {
         const x = document.createElement("li");
-        fillWords(x, s.t);
+        x.dataset.t = s.t;                             // 辞書に渡す文（▶ の文字を混ぜない）
+        if (s.s) {
+          const b = document.createElement("button");
+          b.className = "sp";
+          b.textContent = "▶";
+          b.title = "この文だけ再生";
+          b.onclick = () => play([sentenceItem(sec, k)]);
+          x.appendChild(b);
+        }
+        const t = document.createElement("span");
+        fillWords(t, s.t);
+        x.appendChild(t);
         list.appendChild(x);
-      }
+      });
       det.append(sum, list);
       li.appendChild(det);
     }
@@ -223,6 +234,11 @@ function itemsFor(secId) {
   return items;
 }
 
+function sentenceItem(sec, k) {
+  const s = sec.sentences[k];
+  return { id: `${sec.id}_${k + 1}`, sec, n: k + 1, text: s.s, show: s.t };
+}
+
 // ---- 読み上げ ----
 function play(items, start = 0) {
   stop();
@@ -246,7 +262,8 @@ function advance(g) {
   speakCurrent();
 }
 
-function speakCurrent() {
+// at: その文の何秒目から、fromEnd: 文の終わりの何秒前から（5秒・10秒戻す・進めるで文をまたぐとき）
+function speakCurrent(opts = {}) {
   const g = ++S.gen;
   haltOutput();
   if (S.pos >= S.items.length) { S.playing = false; status("読み終わりました"); $("nowText").hidden = true; return; }
@@ -258,6 +275,10 @@ function speakCurrent() {
     p.playbackRate = parseFloat($("speed").value);
     p.onended = () => advance(g);
     p.onerror = () => advance(g);
+    p.onloadedmetadata = () => {
+      if (opts.at) p.currentTime = Math.min(opts.at, p.duration);
+      else if (opts.fromEnd) p.currentTime = Math.max(0, p.duration - opts.fromEnd);
+    };
     p.play().catch((e) => { if (g === S.gen) status("再生できませんでした: " + e.message); });
   } else if ("speechSynthesis" in window) {
     const u = new SpeechSynthesisUtterance(it.text);
@@ -282,6 +303,26 @@ function pauseResume() {
     if (S.audio?.state === "done") S.player.pause();
     else { S.gen++; speechSynthesis.cancel(); }
     showProgress();
+  }
+}
+
+// 5秒・10秒戻す・進める。文の頭・終わりを越えたら前後の文へ続ける（音声ファイルで再生しているときだけ）
+function seekBy(sec) {
+  if (!S.playing || S.audio?.state !== "done" || !S.player.src) return;
+  const p = S.player;
+  const t = p.currentTime + sec;
+  if (t < 0) {
+    if (S.pos === 0) { p.currentTime = 0; return; }
+    S.pos--;
+    S.paused = false;
+    speakCurrent({ fromEnd: -t });
+  } else if (isFinite(p.duration) && t >= p.duration) {
+    if (S.pos >= S.items.length - 1) { p.currentTime = Math.max(0, p.duration - 0.05); return; }
+    S.pos++;
+    S.paused = false;
+    speakCurrent({ at: t - p.duration });
+  } else {
+    p.currentTime = t;
   }
 }
 
@@ -323,11 +364,18 @@ async function lookup(word, ctx = {}) {
   if (ctx.sec) qs.set("sec", ctx.sec);
   if (ctx.sentence) qs.set("sentence", ctx.sentence);
   const r = await api(`/api/lookup?${qs}`);
-  showWord(r);
-  if (r.vocab_id) { loadVocab(); refreshDue(); }
+  showWord(r, ctx);
 }
 
-function showWord(r) {
+// 「調べる」→「登録」の2段階。登録ボタンを押したときだけ単語帳に入れる
+async function register(word, ctx) {
+  const r = await post("/api/vocab/add", { w: word, paper: S.paper?.id, sec: ctx.sec, sentence: ctx.sentence });
+  showWord(r, ctx);
+  loadVocab();
+  refreshDue();
+}
+
+function showWord(r, ctx = {}) {
   $("wordCard").hidden = false;
   $("wcWord").textContent = r.found ? r.headword : r.normalized || r.query;
   $("wcNote").textContent = r.found && r.note ? `${r.note}（${r.query}）` : "";
@@ -348,9 +396,14 @@ function showWord(r) {
       }
     }
   } else {
-    box.textContent = "辞書に見つかりませんでした。右下の Weblio で見てください（単語帳には入れていません）。";
+    box.textContent = "辞書に見つかりませんでした。右下の Weblio で見てください。";
   }
-  $("wcSource").textContent = r.found ? `${r.source}${r.vocab_id ? " ・ 単語帳に保存" : ""}` : "";
+  $("wcSource").textContent = r.found ? r.source : "";
+  const reg = $("wcRegister");
+  reg.hidden = !r.found;
+  reg.disabled = !!r.registered;
+  reg.textContent = r.registered ? "登録済み ✓" : "単語帳に登録";
+  reg.onclick = () => register(r.query, ctx);
   $("wcWeblio").href = r.weblio;
   $("wcSay").onclick = () => {
     S.wordAudio.src = `/api/word_audio?w=${encodeURIComponent(r.found ? r.headword : r.normalized)}`;
@@ -379,7 +432,7 @@ async function loadVocab() {
     li.title = v.example ? `例: ${v.example}` : "";
     li.append(b, m, del);
     li.onclick = () => showWord({ found: true, headword: v.headword, query: v.headword, source: v.source,
-      entries: v.meaning.split("\n").map((mean) => ({ word: v.headword, mean })), vocab_id: v.id,
+      entries: v.meaning.split("\n").map((mean) => ({ word: v.headword, mean })), registered: true,
       weblio: `https://ejje.weblio.jp/content/${encodeURIComponent(v.headword)}` });
     ul.appendChild(li);
   }
@@ -392,7 +445,7 @@ document.addEventListener("click", (e) => {
   w.classList.add("hit");
   const secEl = w.closest("[data-sec]");
   const sec = S.paper?.sections.find((s) => s.id === secEl?.dataset.sec);
-  const sentence = w.closest("li, .now")?.textContent;
+  const sentence = w.closest("[data-t]")?.dataset.t || w.closest(".now")?.textContent;
   lookup(w.textContent, { sec: sec?.title, sentence });
 });
 
@@ -457,7 +510,7 @@ function renderReview(q) {
   if (!c) {
     const nd = q.next_due ? new Date(q.next_due) : null;
     $("revDone").textContent = q.counts.total === 0
-      ? "単語帳が空です。「読む」で文の中の単語をクリックすると、引いた単語がここに入ります。"
+      ? "単語帳が空です。「読む」で文の中の単語をクリックし、「単語帳に登録」を押すとここに入ります。"
       : `今の分は終わりです。${nd ? `次は ${nd.toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} に出ます。` : ""}`;
     return;
   }
@@ -589,6 +642,7 @@ $("playAll").onclick = () => S.paper && play(itemsFor(null));
 $("pause").onclick = pauseResume;
 $("stop").onclick = stop;
 $("prev").onclick = () => step(-1);
+document.querySelectorAll("[data-seek]").forEach((b) => (b.onclick = () => seekBy(Number(b.dataset.seek))));
 $("next").onclick = () => step(1);
 $("speed").value = pref.get("speed", 1);
 $("speedVal").textContent = Number($("speed").value).toFixed(2);
@@ -613,6 +667,8 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") { $("wordCard").hidden = true; return; }
   if (S.view === "review") return reviewKey(e);
   if (e.code === "Space" && e.target.tagName !== "BUTTON") { e.preventDefault(); pauseResume(); }
+  if (e.key === "ArrowLeft") { e.preventDefault(); seekBy(e.shiftKey ? -10 : -5); }
+  if (e.key === "ArrowRight") { e.preventDefault(); seekBy(e.shiftKey ? 10 : 5); }
 });
 let dragDepth = 0;
 addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; $("drop").hidden = false; });

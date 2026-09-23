@@ -16,7 +16,8 @@
   GET  /api/papers/<id>/audio/<item>.m4a    1文ずつの音声
   GET  /api/papers/<id>/export/<file>.m4a   章ごとの音声
   POST /api/import                      本文 = PDF のバイト列、ヘッダー X-Filename = 元のファイル名（URL エンコード）
-  GET  /api/lookup?w=<語>&paper=&sec=&sentence=   単語を引き、見つかれば単語帳に保存
+  GET  /api/lookup?w=<語>                単語を引く（単語帳には入れない。registered = 登録済みか）
+  POST /api/vocab/add                   {"w", "paper", "sec", "sentence"} で引き直して単語帳に登録する
   GET  /api/word_audio?w=<語>           単語の発音
   GET  /api/vocab                       単語帳
   POST /api/vocab/<n>/delete            単語帳から消す
@@ -237,8 +238,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self._file(d / m.group(2) / m.group(3), "audio/mp4") if d else self.send_error(HTTPStatus.NOT_FOUND)
         if path == "/api/lookup":
             res = app.dict.lookup(q.get("w", ""))
-            res["vocab_id"] = app.vocab.record(res, q.get("paper"), q.get("sec"), q.get("sentence"),
-                                               app.audio_ref(q.get("paper"), q.get("sentence")))
+            res["registered"] = bool(res["found"]) and app.vocab.has(res["headword"])
             return self._json(res)
         if path == "/api/word_audio":
             try:
@@ -323,6 +323,15 @@ class Handler(SimpleHTTPRequestHandler):
         m = re.fullmatch(r"/api/vocab/(\d+)/delete", path)
         if m:
             return self._json({"deleted": app.vocab.delete(int(m.group(1)))})
+        if path == "/api/vocab/add":
+            b = self._body_json()
+            res = app.dict.lookup(str(b.get("w", "")))           # 画面から来た意味は使わず、ここで引き直す
+            if not res["found"]:
+                return self._json({"error": "辞書に無い語は登録できない"}, HTTPStatus.BAD_REQUEST)
+            res["vocab_id"] = app.vocab.record(res, b.get("paper"), b.get("sec"), b.get("sentence"),
+                                               app.audio_ref(b.get("paper"), b.get("sentence")))
+            res["registered"] = True
+            return self._json(res)
         if path == "/api/review/answer":
             b = self._body_json()
             if b.get("rating") not in (1, 2, 3, 4) or not isinstance(b.get("headword"), str):

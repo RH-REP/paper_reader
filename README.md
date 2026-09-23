@@ -16,7 +16,7 @@
 | `store.py` | `data/papers/<sha8>/` への取り込み（元の PDF はコピーするだけ）・一覧・読み出し |
 | `audio.py` | `say` → WAV → `afconvert` で m4a（AAC）。1文ずつと、持ち出し用の章ごと・全体の1本もの |
 | `lookup.py` | 単語を引く。EJDict → 活用を戻す → 派生語を戻す（近い語）→ Free Dictionary API（英英、ネット） |
-| `vocab.py` | 単語帳（`vocab.sqlite`）。引いた語を自動で保存。答えの記録（reviews）が復習の正本 |
+| `vocab.py` | 単語帳（`vocab.sqlite`）。辞書で引いて「登録」した語を入れる。答えの記録（reviews）が復習の正本 |
 | `srs.py` | 復習の計算（py-fsrs、FSRS-6 の既定値、fuzz なし）。新しい語は1日20語まで |
 | `bundle.py` | スマホへ渡す zip と、スマホから戻る記録（JSON）の形 |
 | `share.py` | 同じ Wi‑Fi のスマホへの一時的な受け渡しページ（合言葉付きのアドレス、10分で閉じる） |
