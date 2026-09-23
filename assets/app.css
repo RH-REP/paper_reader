@@ -7,6 +7,7 @@
          --line:#2a3240; --accent:#6aa3e8; --accent-ink:#0d1320; --back:#c9a36c; --hover:#1f2735; }
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--ink);
      font:15px/1.6 -apple-system,"Hiragino Sans","Noto Sans JP",sans-serif}
 .bar{display:flex;align-items:center;gap:14px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:2}

@@ -50,12 +50,16 @@ class Handler(SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write("%s %s\n" % (self.log_date_time_string(), fmt % args))
 
+    def end_headers(self):
+        # update.command で画面を差し替えたら、次に開いたときに必ず新しいものを読む
+        self.send_header("Cache-Control", "no-cache")
+        super().end_headers()
+
     def _json(self, obj, status=HTTPStatus.OK):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
