@@ -1,3 +1,6 @@
 {
-  "data_root": "data"
+  "data_root": "data",
+  "voice": "Samantha",
+  "rate": 175,
+  "online_dict": true
 }

@@ -9,15 +9,19 @@
 <body>
 <header class="bar">
   <h1>paper_reader</h1>
-  <label class="btn" id="importLabel">PDF を取り込む<input type="file" id="importInput" accept="application/pdf,.pdf" multiple hidden></label>
+  <label class="btn">PDF を取り込む<input type="file" id="importInput" accept="application/pdf,.pdf" multiple hidden></label>
+  <form id="searchForm" class="search"><input id="searchInput" type="search" placeholder="英単語を引く" autocomplete="off" spellcheck="false"></form>
   <span id="importMsg" class="muted"></span>
 </header>
 
 <div class="layout">
-  <aside class="papers">
+  <aside class="side">
     <h2>論文</h2>
-    <ul id="paperList"></ul>
+    <ul id="paperList" class="list"></ul>
     <p id="paperEmpty" class="muted" hidden>まだありません。上の「PDF を取り込む」から入れるか、この画面に PDF をドラッグしてください。</p>
+    <h2>単語帳 <span id="vocabCount" class="muted"></span></h2>
+    <ul id="vocabList" class="list vocab"></ul>
+    <p id="vocabEmpty" class="muted" hidden>文の中の単語をクリックすると、引いた単語がここに貯まります。</p>
   </aside>
 
   <main id="main">
@@ -25,6 +29,7 @@
     <section id="paper" hidden>
       <h2 id="paperTitle"></h2>
       <p id="paperMeta" class="muted"></p>
+      <p id="audioLine" class="audioline"></p>
 
       <div class="player">
         <div class="row">
@@ -35,11 +40,12 @@
           <button id="stop" title="停止">■</button>
           <span id="status" class="status">停止中</span>
         </div>
+        <p id="nowText" class="now" hidden></p>
         <div class="row opts">
-          <label>声 <select id="voice"></select></label>
-          <label>速さ <input type="range" id="rate" min="0.6" max="1.6" step="0.05" value="1"> <span id="rateVal">1.00</span></label>
-          <label><input type="checkbox" id="skipCites" checked> 引用 (Smith et al., 2020) を読まない</label>
+          <label>再生速度 <input type="range" id="speed" min="0.7" max="2" step="0.05" value="1"> <span id="speedVal">1.00</span>×</label>
           <label><input type="checkbox" id="skipBack" checked> 後付け（References など）を「全体」で読まない</label>
+          <label>声 <select id="voice"></select></label>
+          <button id="regen" class="small" hidden>この声で作り直す</button>
         </div>
       </div>
 
@@ -47,6 +53,14 @@
     </section>
   </main>
 </div>
+
+<aside id="wordCard" class="wordcard" hidden>
+  <button id="wordClose" class="close" title="閉じる">×</button>
+  <div class="wc-head"><b id="wcWord"></b> <span id="wcNote" class="tag"></span>
+    <button id="wcSay" class="small" title="発音">🔈</button></div>
+  <div id="wcMeans" class="wc-means"></div>
+  <div class="wc-foot muted"><span id="wcSource"></span> <a id="wcWeblio" target="_blank" rel="noopener">Weblio で見る ↗</a></div>
+</aside>
 
 <div id="drop" class="drop" hidden>ここに PDF を落とすと取り込みます</div>
 <script src="assets/app.js"></script>
