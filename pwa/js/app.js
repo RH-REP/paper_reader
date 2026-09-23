@@ -1,0 +1,502 @@
+// paper_reader スマホ版（PWA）。Mac で作った論文・音声・単語帳を読み込み、聞く・引く・復習する。
+// データはこのスマホの IndexedDB にだけ置く。Mac とは zip（Mac → スマホ）と JSON（スマホ → Mac）で受け渡す。
+import * as db from "./db.js";
+import { lookup } from "./lookup.js";
+import * as srs from "./srs.js";
+import { unzipStored, text } from "./zip.js";
+
+const VERSION = "1";
+const $ = (id) => document.getElementById(id);
+const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
+            player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
+
+// ---- 共通 ----
+function uid() { return crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "") : Math.random().toString(16).slice(2) + Date.now().toString(16); }
+function fillWords(el, t) {
+  el.textContent = "";
+  for (const part of t.split(/([A-Za-z](?:[A-Za-z'’\-]*[A-Za-z])?)/)) {
+    if (!part) continue;
+    if (/^[A-Za-z]/.test(part)) { const s = document.createElement("span"); s.className = "w"; s.textContent = part; el.appendChild(s); }
+    else el.appendChild(document.createTextNode(part));
+  }
+}
+function markWord(t, head) {
+  const el = document.createElement("span");
+  const re = new RegExp(`\\b(${head.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\w*)`, "i");
+  t.split(re).forEach((p, i) => {
+    if (i % 2) { const m = document.createElement("mark"); m.textContent = p; el.appendChild(m); }
+    else el.appendChild(document.createTextNode(p));
+  });
+  return el;
+}
+async function kv(key, value) {
+  if (value === undefined) return db.get("kv", key);
+  return db.put("kv", key, value);
+}
+
+// ---- 画面の切り替え（#read #review #words #data #help）----
+function route() {
+  const v = (location.hash || "#read").slice(1);
+  S.view = ["read", "review", "words", "data", "help"].includes(v) ? v : "read";
+  document.querySelectorAll(".view").forEach((s) => (s.hidden = s.id !== `v-${S.view}`));
+  document.querySelectorAll(".tabs a").forEach((a) => a.classList.toggle("on", a.dataset.v === S.view));
+  $("sheet").hidden = true;
+  if (S.view === "review") loadReview();
+  if (S.view === "words") loadWords();
+  if (S.view === "data") loadStats();
+  window.scrollTo(0, 0);
+}
+addEventListener("hashchange", route);
+
+// ---- 論文 ----
+async function loadPapers() {
+  S.papers = (await db.all("papers")).sort((a, b) => (a.meta.imported_at < b.meta.imported_at ? 1 : -1));
+  const ul = $("paperList");
+  ul.innerHTML = "";
+  $("paperEmpty").hidden = S.papers.length > 0;
+  for (const p of S.papers) {
+    const li = document.createElement("li");
+    li.textContent = p.meta.title;
+    const sm = document.createElement("small");
+    sm.textContent = `${p.meta.pages}ページ・${p.meta.sections}章・${p.meta.sentences}文`;
+    li.appendChild(sm);
+    li.onclick = () => openPaper(p.id);
+    ul.appendChild(li);
+  }
+}
+
+async function openPaper(id) {
+  const p = await db.get("papers", id);
+  if (!p) return;
+  S.paper = p;
+  await kv("last_paper", id);
+  $("paperPick").hidden = true;
+  $("paperView").hidden = false;
+  $("paperTitle").textContent = p.meta.title;
+  const ol = $("sections");
+  ol.innerHTML = "";
+  for (const sec of p.paper.sections) {
+    const li = document.createElement("li");
+    li.className = `sec l${Math.min(sec.level, 3)}` + (sec.kind === "back" ? " back" : "");
+    li.dataset.sec = sec.id;
+    const head = document.createElement("div");
+    head.className = "head";
+    const b = document.createElement("button");
+    b.className = "play";
+    b.textContent = "▶";
+    b.onclick = () => play(itemsFor(sec.id));
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = sec.title;
+    const c = document.createElement("span");
+    c.className = "count";
+    c.textContent = `${sec.sentences.length}文`;
+    head.append(b, name, c);
+    li.appendChild(head);
+    if (sec.sentences.length) {
+      const det = document.createElement("details");
+      const sum = document.createElement("summary");
+      sum.textContent = "文を見る（単語をタップで辞書）";
+      const list = document.createElement("ol");
+      for (const s of sec.sentences) { const x = document.createElement("li"); fillWords(x, s.t); list.appendChild(x); }
+      det.append(sum, list);
+      li.appendChild(det);
+    }
+    ol.appendChild(li);
+  }
+}
+$("backToList").onclick = () => { $("paperPick").hidden = false; $("paperView").hidden = true; };
+
+// ---- 読み上げ（1文ずつの m4a を順に鳴らす）----
+function itemsFor(secId) {
+  const secs = S.paper.paper.sections;
+  let pick;
+  if (!secId) pick = secs.filter((s) => !($("skipBack").checked && s.kind === "back"));
+  else {
+    const i = secs.findIndex((s) => s.id === secId);
+    let j = i + 1;
+    while (j < secs.length && secs[j].level > secs[i].level) j++;
+    pick = secs.slice(i, j);
+  }
+  const items = [];
+  for (const sec of pick) {
+    items.push({ id: `${sec.id}_h`, sec, n: 0, text: sec.speech_title, show: sec.title, heading: true });
+    sec.sentences.forEach((s, k) => { if (s.s) items.push({ id: `${sec.id}_${k + 1}`, sec, n: k + 1, text: s.s, show: s.t }); });
+  }
+  return items;
+}
+
+function play(items, start = 0) {
+  stop();
+  if (!items.length) return;
+  Object.assign(S, { items, pos: start, playing: true, paused: false });
+  $("player").hidden = false;
+  speakCurrent();
+}
+
+function halt() {
+  S.player.pause();
+  S.player.removeAttribute("src");
+  if (S.url) { URL.revokeObjectURL(S.url); S.url = null; }
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+}
+
+function advance(g) { if (g !== S.gen || S.paused) return; S.pos++; speakCurrent(); }
+
+async function speakCurrent() {
+  const g = ++S.gen;
+  halt();
+  if (S.pos >= S.items.length) { S.playing = false; $("status").textContent = "読み終わりました"; setMedia(); return; }
+  const it = S.items[S.pos];
+  showProgress();
+  const blob = await db.get("audio", `${S.paper.id}/${it.id}`);
+  if (g !== S.gen) return;
+  if (blob) {
+    S.url = URL.createObjectURL(blob);
+    const p = S.player;
+    p.src = S.url;
+    p.playbackRate = parseFloat($("speed").value);
+    p.onended = () => advance(g);
+    p.onerror = () => advance(g);
+    p.play().catch((e) => { if (g === S.gen) $("status").textContent = "再生できませんでした: " + e.message; });
+  } else if ("speechSynthesis" in window) {
+    const u = new SpeechSynthesisUtterance(it.text);
+    u.lang = "en-US";
+    u.rate = parseFloat($("speed").value);
+    u.onend = () => advance(g);
+    u.onerror = (e) => { if (e.error !== "interrupted" && e.error !== "canceled") advance(g); };
+    speechSynthesis.speak(u);
+  }
+  setMedia();
+}
+
+function pauseResume() {
+  if (!S.playing) return;
+  if (S.paused) { S.paused = false; if (S.player.src) S.player.play(); else speakCurrent(); }
+  else { S.paused = true; if (S.player.src) S.player.pause(); else { S.gen++; speechSynthesis.cancel(); } }
+  showProgress();
+  setMedia();
+}
+function step(d) { if (!S.playing) return; S.pos = Math.max(0, Math.min(S.items.length - 1, S.pos + d)); S.paused = false; speakCurrent(); }
+function stop() {
+  S.gen++;
+  Object.assign(S, { playing: false, paused: false, items: [] });
+  halt();
+  $("player").hidden = true;
+  setMedia();
+}
+function showProgress() {
+  const it = S.items[S.pos];
+  const where = it.heading ? "見出し" : `${it.n}/${it.sec.sentences.length}文`;
+  $("status").textContent = `${S.paused ? "一時停止中 — " : ""}${it.sec.title} ・ ${where}（${S.pos + 1}/${S.items.length}）`;
+  $("pause").textContent = S.paused ? "▶" : "⏸";
+  $("nowText").dataset.sec = it.sec.id;
+  fillWords($("nowText"), it.show);
+}
+// ロック画面・通知の操作
+function setMedia() {
+  if (!("mediaSession" in navigator)) return;
+  const it = S.playing && S.items[S.pos];
+  navigator.mediaSession.metadata = it ? new MediaMetadata({ title: it.sec.title, artist: S.paper.meta.title, album: "paper_reader",
+    artwork: [{ src: "icons/icon-512.png", sizes: "512x512", type: "image/png" }] }) : null;
+  navigator.mediaSession.playbackState = !S.playing ? "none" : S.paused ? "paused" : "playing";
+}
+if ("mediaSession" in navigator) {
+  navigator.mediaSession.setActionHandler("play", () => S.paused && pauseResume());
+  navigator.mediaSession.setActionHandler("pause", () => !S.paused && pauseResume());
+  navigator.mediaSession.setActionHandler("nexttrack", () => step(1));
+  navigator.mediaSession.setActionHandler("previoustrack", () => step(-1));
+}
+$("playAll").onclick = () => S.paper && play(itemsFor(null));
+$("pause").onclick = pauseResume;
+$("prev").onclick = () => step(-1);
+$("next").onclick = () => step(1);
+$("stop").onclick = stop;
+$("speed").oninput = () => {
+  $("speedVal").textContent = `${Number($("speed").value).toFixed(2)}×`;
+  S.player.playbackRate = parseFloat($("speed").value);
+  kv("speed", $("speed").value);
+};
+
+// ---- 単語 ----
+function audioRef(sentence) {
+  if (!S.paper || !sentence) return null;
+  for (const sec of S.paper.paper.sections) {
+    const k = sec.sentences.findIndex((s) => s.t === sentence);
+    if (k >= 0 && sec.sentences[k].s) return `${S.paper.id}/${sec.id}_${k + 1}`;
+  }
+  return null;
+}
+
+async function recordLookup(r, ctx) {
+  if (!r.found) return;
+  const now = new Date().toISOString();
+  const meaning = r.entries.slice(0, 2).map((e) => e.mean).join("\n");
+  const ex = ctx.sentence ? [{ sentence: ctx.sentence, section: ctx.section || null, paper_id: S.paper?.id || null,
+                                audio_ref: audioRef(ctx.sentence) }] : [];
+  const w = (await db.get("words", r.headword)) || { headword: r.headword, meaning, source: r.source, first_seen: now,
+                                                      examples: [], origin: "phone" };
+  w.last_seen = now;
+  w.examples = [...ex, ...(w.examples || [])].slice(0, 3);
+  await db.put("words", r.headword, w);
+  const lk = { uid: uid(), headword: r.headword, meaning, source: r.source, looked_at: now, query: r.query,
+               paper_id: S.paper?.id || null, section: ctx.section || null, sentence: ctx.sentence || null,
+               audio_ref: ex[0]?.audio_ref || null };
+  await db.put("lookups", lk.uid, lk);
+  refreshBadge();
+}
+
+function showWord(r) {
+  $("sheet").hidden = false;
+  $("wcWord").textContent = r.found ? r.headword : r.normalized || r.query;
+  $("wcNote").textContent = r.found && r.note ? `${r.note}（${r.query}）` : "";
+  const box = $("wcMeans");
+  box.textContent = "";
+  if (r.found) {
+    for (const e of r.entries) for (const m of e.mean.split(/\n| \/ /)) { const d = document.createElement("div"); d.textContent = m; box.appendChild(d); }
+  } else {
+    box.textContent = navigator.onLine ? "辞書に見つかりませんでした。" : "辞書に見つかりませんでした（オフライン）。";
+  }
+  $("wcSource").textContent = r.found ? `${r.source || ""}${r.saved ? " ・ 単語帳に保存" : ""}` : "";
+  $("wcWeblio").href = r.weblio || `https://ejje.weblio.jp/content/${encodeURIComponent(r.headword || r.query)}`;
+  $("wcSay").onclick = () => sayWord(r.found ? r.headword : r.normalized);
+}
+
+function sayWord(w) {
+  if (!("speechSynthesis" in window) || !w) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(w);
+  u.lang = "en-US";
+  speechSynthesis.speak(u);
+}
+
+async function lookupAndShow(word, ctx = {}) {
+  const r = await lookup(word);
+  if (r.found) { await recordLookup(r, ctx); r.saved = true; }
+  showWord(r);
+  if (S.view === "words") loadWords();
+}
+
+document.addEventListener("click", (e) => {
+  const w = e.target.closest(".w");
+  if (!w) return;
+  document.querySelectorAll(".w.hit").forEach((x) => x.classList.remove("hit"));
+  w.classList.add("hit");
+  const secEl = w.closest("[data-sec]");
+  const sec = S.paper?.paper.sections.find((s) => s.id === secEl?.dataset.sec);
+  lookupAndShow(w.textContent, { section: sec?.title, sentence: w.closest("li, .now")?.textContent });
+});
+$("sheetClose").onclick = () => { $("sheet").hidden = true; };
+$("searchForm").onsubmit = (e) => { e.preventDefault(); const w = $("searchInput").value.trim(); if (w) lookupAndShow(w); };
+
+async function loadWords() {
+  const t = (w) => new Date(w.last_seen || w.first_seen).getTime();
+  const words = (await db.all("words")).sort((a, b) => t(b) - t(a));
+  $("wordCount").textContent = words.length ? `${words.length}語` : "";
+  $("wordEmpty").hidden = words.length > 0;
+  const ul = $("wordList");
+  ul.innerHTML = "";
+  for (const w of words) {
+    const li = document.createElement("li");
+    const b = document.createElement("b");
+    b.textContent = w.headword;
+    const m = document.createElement("span");
+    m.className = "m";
+    m.textContent = w.meaning.split(/[\n/]/)[0];
+    li.append(b, m);
+    li.onclick = () => showWord({ found: true, headword: w.headword, query: w.headword, source: w.source,
+      entries: w.meaning.split("\n").map((mean) => ({ word: w.headword, mean })) });
+    ul.appendChild(li);
+  }
+}
+
+// ---- 復習 ----
+async function refreshBadge() {
+  const q = srs.queue(await db.all("words"), await db.all("reviews"));
+  const n = q.counts.new + q.counts.learning + q.counts.review;
+  $("dueBadge").hidden = !n;
+  $("dueBadge").textContent = n;
+  return q;
+}
+
+async function loadReview() {
+  const q = await refreshBadge();
+  S.review = q;
+  const c = q.counts;
+  $("revCounts").innerHTML = `新 <b class="n">${c.new}</b> ・ 途中 <b class="l">${c.learning}</b> ・ 復習 <b class="v">${c.review}</b>`;
+  const card = q.card;
+  $("revCard").hidden = !card;
+  $("revActions").hidden = !card;
+  $("revDone").hidden = !!card;
+  if (!card) {
+    $("revDone").textContent = c.total === 0 ? "単語帳が空です。論文の文の中の単語をタップするか、Mac のデータを読み込んでください。"
+      : `今の分は終わりです。${q.next_due ? `次は ${q.next_due.toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} に出ます。` : ""}`;
+    return;
+  }
+  $("revWord").textContent = card.headword;
+  const ex = $("revExamples");
+  ex.textContent = "";
+  for (const e of card.examples || []) {
+    if (!e.sentence) continue;
+    const d = document.createElement("div");
+    d.appendChild(markWord(e.sentence, card.headword));
+    if (e.audio_ref) {
+      const b = document.createElement("button");
+      b.className = "icon";
+      b.textContent = "🔈";
+      b.onclick = async () => {
+        const blob = await db.get("audio", e.audio_ref);
+        if (blob) { S.wordAudio.src = URL.createObjectURL(blob); S.wordAudio.play().catch(() => {}); } else sayWord(e.sentence);
+      };
+      d.append(" ", b);
+    }
+    if (e.section) { const s = document.createElement("span"); s.className = "src"; s.textContent = e.section; d.appendChild(s); }
+    ex.appendChild(d);
+  }
+  $("revMeaning").textContent = "";
+  for (const line of card.meaning.split(/\n| \/ /)) { const d = document.createElement("div"); d.textContent = line; $("revMeaning").appendChild(d); }
+  $("revSource").textContent = `${card.source || ""} ・ これまで ${card.reviews} 回`;
+  document.querySelectorAll("#revButtons button").forEach((b) => { b.querySelector("small").textContent = card.intervals[b.dataset.r]; });
+  $("revBack").hidden = true;
+  $("revButtons").hidden = true;
+  $("revShow").hidden = false;
+}
+$("revShow").onclick = () => { $("revBack").hidden = false; $("revButtons").hidden = false; $("revShow").hidden = true; };
+document.querySelectorAll("#revButtons button").forEach((b) => (b.onclick = async () => {
+  const card = S.review?.card;
+  if (!card) return;
+  const rv = { uid: uid(), headword: card.headword, rating: Number(b.dataset.r), reviewed_at: new Date().toISOString(), device: S.device };
+  await db.put("reviews", rv.uid, rv);
+  loadReview();
+}));
+$("revUndo").onclick = async () => {
+  const mine = (await db.all("reviews")).filter((r) => r.device === S.device).sort((a, b) => (a.reviewed_at < b.reviewed_at ? 1 : -1));
+  if (!mine.length) { $("revDone").hidden = false; $("revDone").textContent = "取り消せる答えがありません。"; return; }
+  await db.del("reviews", mine[0].uid);
+  loadReview();
+};
+$("revSay").onclick = () => S.review?.card && sayWord(S.review.card.headword);
+
+// ---- データの受け渡し ----
+async function importBundle(file) {
+  $("importMsg").textContent = "読み込んでいます…";
+  const files = unzipStored(await file.arrayBuffer());
+  const man = JSON.parse(text(files.get("manifest.json") || new Uint8Array()) || "{}");
+  if (man.kind !== "paper_reader_bundle") throw new Error("paper_reader の zip ではありません");
+  if (man.version !== 1) throw new Error(`zip の版が違います（${man.version}）`);
+  let nAudio = 0;
+  for (const pid of man.papers) {
+    const meta = JSON.parse(text(files.get(`papers/${pid}/meta.json`)));
+    const paper = JSON.parse(text(files.get(`papers/${pid}/sentences.json`)));
+    const entries = [["papers", pid, { id: pid, meta, paper }]];
+    for (const [name, bytes] of files) {
+      const m = name.match(/^papers\/([0-9a-f]{8})\/audio\/([A-Za-z0-9_]+)\.m4a$/);
+      if (m && m[1] === pid) { entries.push(["audio", `${pid}/${m[2]}`, new Blob([bytes], { type: "audio/mp4" })]); nAudio++; }
+    }
+    await db.putMany(entries);
+  }
+  const vocab = JSON.parse(text(files.get("vocab.json")));
+  const entries = [];
+  for (const w of vocab.words) {
+    const old = await db.get("words", w.headword);
+    entries.push(["words", w.headword, { ...old, ...w, origin: old?.origin === "phone" ? "both" : "mac",
+                                         last_seen: old?.last_seen || w.first_seen }]);
+  }
+  for (const r of vocab.reviews) entries.push(["reviews", r.uid, r]);
+  await db.putMany(entries);
+  await kv("last_import", { at: new Date().toISOString(), created_at: man.created_at, papers: man.papers.length });
+  return `読み込みました: 論文 ${man.papers.length} 本（音声 ${nAudio} 本）、単語 ${vocab.words.length} 語、答えの記録 ${vocab.reviews.length} 件`;
+}
+
+$("importInput").onchange = async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  try {
+    $("importMsg").textContent = await importBundle(f);
+    await loadPapers();
+    refreshBadge();
+    loadStats();
+  } catch (err) { $("importMsg").textContent = "読み込めませんでした: " + err.message; }
+};
+
+async function exportProgress() {
+  const lookups = await db.all("lookups");
+  const reviews = (await db.all("reviews")).filter((r) => r.device === S.device);
+  const data = { kind: "paper_reader_progress", version: 1, device: S.device, exported_at: new Date().toISOString(), lookups, reviews };
+  const d = new Date(), z = (n) => String(n).padStart(2, "0");
+  const stamp = `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}`;
+  const name = `paper_reader_progress_${stamp}.json`;
+  const file = new File([JSON.stringify(data)], name, { type: "application/json" });
+  await kv("last_export", { at: data.exported_at, lookups: lookups.length, reviews: reviews.length });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: "paper_reader の記録" }); return `共有しました（${name}）`; }
+    catch (e) { if (e.name === "AbortError") return "共有をやめました"; }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(file);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  return `「ダウンロード」に保存しました（${name}、引いた語 ${lookups.length}・答え ${reviews.length}）`;
+}
+$("exportBtn").onclick = async () => { $("exportMsg").textContent = await exportProgress(); loadStats(); };
+
+async function loadStats() {
+  const [papers, audioKeys, words, reviews, lookups] = await Promise.all(
+    [db.keys("papers"), db.keys("audio"), db.keys("words"), db.all("reviews"), db.keys("lookups")]);
+  const li = [`論文 ${papers.length} 本（音声 ${audioKeys.length} 本）`, `単語帳 ${words.length} 語`,
+              `答えの記録 ${reviews.length} 件（このスマホで ${reviews.filter((r) => r.device === S.device).length} 件）`,
+              `このスマホで引いた記録 ${lookups.length} 件`];
+  const imp = await kv("last_import"), exp = await kv("last_export");
+  if (imp) li.push(`最後に読み込んだ: ${new Date(imp.at).toLocaleString("ja-JP")}`);
+  if (exp) li.push(`最後に書き出した: ${new Date(exp.at).toLocaleString("ja-JP")}`);
+  if (navigator.storage?.estimate) {
+    const est = await navigator.storage.estimate();
+    li.push(`使っている容量: ${(est.usage / 1e6).toFixed(1)} MB`);
+  }
+  $("stats").innerHTML = "";
+  for (const t of li) { const x = document.createElement("li"); x.textContent = t; $("stats").appendChild(x); }
+}
+
+$("dictBtn").onclick = async () => {
+  $("dictBtn").disabled = true;
+  let ok = 0;
+  for (const ch of "abcdefghijklmnopqrstuvwxyz") {
+    $("dictBtn").textContent = `保存中… ${ch}`;
+    try { if ((await fetch(`dict/${ch}.json`)).ok) ok++; } catch {}
+  }
+  $("dictBtn").textContent = ok === 26 ? "辞書を保存しました（オフラインで引けます）" : `保存できたのは ${ok}/26（電波のある所でもう一度）`;
+  $("dictBtn").disabled = false;
+};
+
+$("wipeBtn").onclick = async () => {
+  if (!confirm("このスマホの論文・音声・単語帳・復習の記録をすべて消します。Mac に戻していない記録も消えます。よろしいですか？")) return;
+  stop();
+  await db.clearAll();
+  await kv("device", S.device);
+  S.paper = null;
+  $("paperPick").hidden = false;
+  $("paperView").hidden = true;
+  await loadPapers();
+  refreshBadge();
+  loadStats();
+};
+
+// ---- 起動 ----
+async function init() {
+  S.device = (await kv("device")) || `phone-${uid().slice(0, 8)}`;
+  await kv("device", S.device);
+  const sp = await kv("speed");
+  if (sp) { $("speed").value = sp; $("speedVal").textContent = `${Number(sp).toFixed(2)}×`; }
+  $("version").textContent = `版 ${VERSION} ・ この機器の名前 ${S.device}`;
+  await loadPapers();
+  const last = await kv("last_paper");
+  if (last && S.papers.some((p) => p.id === last)) openPaper(last);
+  refreshBadge();
+  route();
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});   // 容量が足りなくなっても消されにくくする
+}
+init();

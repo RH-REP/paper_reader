@@ -18,7 +18,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
-from server import load_config  # noqa: E402
 
 REPO = "kujirahand/EJDict"
 RAW = f"https://raw.githubusercontent.com/{REPO}/{{ref}}/src/{{name}}"
@@ -40,6 +39,7 @@ def main():
     ap.add_argument("--config", type=Path, default=None)
     ap.add_argument("--src", type=Path, help="a.txt〜z.txt のあるフォルダ（無ければ GitHub から取る）")
     a = ap.parse_args()
+    from server import load_config                         # ここで読む（build_pwa_dict.py から使うときは要らない）
     out_dir = Path(load_config(a.config)["data_root"]) / "dict"
     out_dir.mkdir(parents=True, exist_ok=True)
 

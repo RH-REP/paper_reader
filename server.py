@@ -20,6 +20,15 @@
   GET  /api/word_audio?w=<語>           単語の発音
   GET  /api/vocab                       単語帳
   POST /api/vocab/<n>/delete            単語帳から消す
+  GET  /api/review                      次に復習する語（表・裏・4つのボタンの間隔）と残りの数
+  POST /api/review/answer               {"headword", "rating": 1-4}（もう一度／難しい／正解／簡単）
+  POST /api/review/undo                 この Mac で最後に答えた1件を取り消す
+  GET  /api/bundle?papers=<id,id>       スマホ用の zip を作って渡す（ファイルで写すとき）
+  POST /api/progress                    本文 = スマホから書き出した記録（JSON）。単語帳に合わせる
+  GET  /api/share                       受け渡しページの状態
+  GET  /api/qr?t=<文字列>                QR コード（SVG）
+  POST /api/share/start                 {"papers": [id...]} で zip を作り、同じ Wi‑Fi 向けの受け渡しページを開く（10分）
+  POST /api/share/stop                  受け渡しページを閉じる
 """
 from __future__ import annotations
 
@@ -38,13 +47,16 @@ from urllib.parse import parse_qs, unquote, urlsplit
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import audio  # noqa: E402
+import bundle  # noqa: E402
 from lookup import Dictionary  # noqa: E402
+from share import ShareServer  # noqa: E402
 from store import Store  # noqa: E402
 from vocab import Vocab  # noqa: E402
 
 STATIC = {"/": "index.html", "/index.html": "index.html"}
 MAX_UPLOAD = 200 * 1024 * 1024
-DEFAULTS = {"data_root": "data", "voice": audio.DEFAULT_VOICE, "rate": 175, "online_dict": True}
+DEFAULTS = {"data_root": "data", "voice": audio.DEFAULT_VOICE, "rate": 175, "online_dict": True,
+            "pwa_url": "https://rh-rep.github.io/paper_reader/"}
 
 
 def load_config(path: Path | None) -> dict:
@@ -68,6 +80,30 @@ class App:
         self.vocab = Vocab(self.cfg["data_root"])
         self.lock = threading.Lock()
         self.jobs: dict[str, threading.Thread] = {}
+        self.share = ShareServer(self.merge_progress)
+
+    def merge_progress(self, data: bytes) -> dict:
+        return self.vocab.merge(bundle.read_progress(data))
+
+    def make_bundle(self, ids) -> Path:
+        ids = [i for i in ids if re.fullmatch(r"[0-9a-f]{8}", i or "")]
+        for i in ids:
+            self.store.paper_dir(i)                       # 無い id は KeyError
+        return bundle.make_bundle(self.store, self.vocab, ids, self.store.root / "share")
+
+    def audio_ref(self, pid, sentence) -> str | None:
+        """引いた文の音声（<論文id>/<音声id>）。見つからなければ None。"""
+        if not (pid and sentence):
+            return None
+        try:
+            paper = self.store.load(pid)
+        except KeyError:
+            return None
+        for sec in paper["sections"]:
+            for k, s in enumerate(sec["sentences"], 1):
+                if s["t"] == sentence and s["s"]:
+                    return f"{pid}/{sec['id']}_{k}"
+        return None
 
     def save_config(self, voice=None, rate=None):
         if voice is not None:
@@ -178,6 +214,7 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/config":
             meta = app.dict.path.parent / "meta.json"
             return self._json({"voice": audio.resolve_voice(app.cfg["voice"]), "rate": app.cfg["rate"],
+                               "pwa_url": app.cfg["pwa_url"],
                                "voices": audio.voices(), "dict": app.dict.available(),
                                "dict_meta": json.loads(meta.read_text(encoding="utf-8")) if meta.exists() else None})
         if path == "/api/papers":
@@ -200,7 +237,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._file(d / m.group(2) / m.group(3), "audio/mp4") if d else self.send_error(HTTPStatus.NOT_FOUND)
         if path == "/api/lookup":
             res = app.dict.lookup(q.get("w", ""))
-            res["vocab_id"] = app.vocab.record(res, q.get("paper"), q.get("sec"), q.get("sentence"))
+            res["vocab_id"] = app.vocab.record(res, q.get("paper"), q.get("sec"), q.get("sentence"),
+                                               app.audio_ref(q.get("paper"), q.get("sentence")))
             return self._json(res)
         if path == "/api/word_audio":
             try:
@@ -210,6 +248,33 @@ class Handler(SimpleHTTPRequestHandler):
             return self._file(p, "audio/mp4") if p else self.send_error(HTTPStatus.BAD_REQUEST)
         if path == "/api/vocab":
             return self._json(app.vocab.list())
+        if path == "/api/review":
+            return self._json(app.vocab.queue())
+        if path == "/api/share":
+            return self._json(app.share.status())
+        if path == "/api/qr":
+            from share import qr_svg
+            body = qr_svg(q.get("t", "")[:500]).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "image/svg+xml")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path == "/api/bundle":
+            try:
+                z = app.make_bundle([x for x in q.get("papers", "").split(",") if x])
+            except KeyError:
+                return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Length", str(z.stat().st_size))
+            self.send_header("Content-Disposition", f'attachment; filename="{z.name}"')
+            self.end_headers()
+            with z.open("rb") as f:
+                while chunk := f.read(1 << 16):
+                    self.wfile.write(chunk)
+            return
         # 画面だけを配る。data/ など他のファイルは出さない
         if path in STATIC or path.startswith("/assets/"):
             self.path = "/" + STATIC.get(path, path.lstrip("/"))
@@ -255,6 +320,40 @@ class Handler(SimpleHTTPRequestHandler):
         m = re.fullmatch(r"/api/vocab/(\d+)/delete", path)
         if m:
             return self._json({"deleted": app.vocab.delete(int(m.group(1)))})
+        if path == "/api/review/answer":
+            b = self._body_json()
+            if b.get("rating") not in (1, 2, 3, 4) or not isinstance(b.get("headword"), str):
+                return self._json({"error": "headword と rating(1-4) が要る"}, HTTPStatus.BAD_REQUEST)
+            try:
+                app.vocab.answer(b["headword"], b["rating"])
+            except KeyError:
+                return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            return self._json(app.vocab.queue())
+        if path == "/api/review/undo":
+            undone = app.vocab.undo()
+            q = app.vocab.queue()
+            if undone:
+                q["card"] = app.vocab.card_view(undone)       # 取り消した語をもう一度出す
+            return self._json({**q, "undone": undone})
+        if path == "/api/progress":
+            n = int(self.headers.get("Content-Length") or 0)
+            if not 0 < n <= 20 * 1024 * 1024:
+                return self._json({"error": "空か大きすぎる"}, HTTPStatus.BAD_REQUEST)
+            try:
+                return self._json(app.merge_progress(self.rfile.read(n)))
+            except (ValueError, KeyError, TypeError) as e:
+                return self._json({"error": str(e)}, HTTPStatus.BAD_REQUEST)
+        if path == "/api/share/start":
+            try:
+                z = app.make_bundle(self._body_json().get("papers") or [])
+                return self._json(app.share.start(z, app.cfg["pwa_url"]))
+            except KeyError:
+                return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            except RuntimeError as e:
+                return self._json({"error": str(e)}, HTTPStatus.SERVICE_UNAVAILABLE)
+        if path == "/api/share/stop":
+            app.share.stop()
+            return self._json({"active": False})
         if path == "/api/import":
             n = int(self.headers.get("Content-Length") or 0)
             if not 0 < n <= MAX_UPLOAD:

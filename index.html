@@ -9,6 +9,11 @@
 <body>
 <header class="bar">
   <h1>paper_reader</h1>
+  <nav class="tabs">
+    <button data-view="read" class="on">読む</button>
+    <button data-view="review">復習 <span id="dueBadge" class="badge" hidden></span></button>
+    <button data-view="phone">スマホ</button>
+  </nav>
   <label class="btn">PDF を取り込む<input type="file" id="importInput" accept="application/pdf,.pdf" multiple hidden></label>
   <form id="searchForm" class="search"><input id="searchInput" type="search" placeholder="英単語を引く" autocomplete="off" spellcheck="false"></form>
   <span id="importMsg" class="muted"></span>
@@ -25,6 +30,87 @@
   </aside>
 
   <main id="main">
+    <section id="reviewView" class="view" hidden>
+      <h2>復習</h2>
+      <p id="revCounts" class="counts"></p>
+      <div id="revCard" class="card" hidden>
+        <div class="front">
+          <div class="hw"><span id="revWord"></span> <button id="revSay" class="small" title="発音">🔈</button></div>
+          <div id="revExamples" class="examples"></div>
+        </div>
+        <div id="revBack" class="back" hidden>
+          <div id="revMeaning" class="meaning"></div>
+          <p id="revSource" class="muted"></p>
+        </div>
+        <div class="actions">
+          <button id="revShow" class="primary wide">答えを見る <kbd>Space</kbd></button>
+          <div id="revButtons" class="rate" hidden>
+            <button data-r="1" class="r1">もう一度<small></small><kbd>1</kbd></button>
+            <button data-r="2" class="r2">難しい<small></small><kbd>2</kbd></button>
+            <button data-r="3" class="r3">正解<small></small><kbd>3</kbd></button>
+            <button data-r="4" class="r4">簡単<small></small><kbd>4</kbd></button>
+          </div>
+        </div>
+      </div>
+      <p id="revDone" class="done" hidden></p>
+      <p class="muted"><button id="revUndo" class="small">↶ 1つ前の答えを取り消す <kbd>Z</kbd></button></p>
+      <details class="howto"><summary>復習のしかた</summary>
+        <ol>
+          <li>単語と、それを引いた論文の文が出ます。意味を思い出してから「答えを見る」（スペース）。</li>
+          <li>思い出せた度合いで4つから選びます。ボタンの下の時間は、次にその単語が出るまでの間隔です。
+            <ul><li><b>もう一度</b>: 思い出せなかった（すぐにまた出る）</li>
+                <li><b>難しい</b>: なんとか思い出した</li>
+                <li><b>正解</b>: 少し考えて思い出した（迷ったらこれ）</li>
+                <li><b>簡単</b>: すぐわかった（間隔が大きく伸びる）</li></ul></li>
+          <li>新しい単語は1日20語まで。期限の来た単語が先に出ます。間隔は FSRS（Anki と同じ方式）で決まります。</li>
+        </ol></details>
+    </section>
+
+    <section id="phoneView" class="view" hidden>
+      <h2>スマホ（Android）で使う</h2>
+      <div class="grid2">
+        <div class="panel">
+          <h3>1. app を入れる（最初の1回）</h3>
+          <div class="qrrow"><div id="pwaQr" class="qr"></div>
+            <ol>
+              <li>Android の Chrome でこの QR を読むか、<a id="pwaLink" target="_blank" rel="noopener"></a> を開く</li>
+              <li>右上の ︙ →「<b>ホーム画面に追加</b>」（または「アプリをインストール」）</li>
+              <li>ホーム画面の <b>paper_reader</b> から開く。以後はオフラインでも動く</li>
+            </ol></div>
+        </div>
+        <div class="panel">
+          <h3>2. 論文と単語帳を写す（Mac → スマホ）</h3>
+          <p class="muted">送る論文（音声ができているもの）:</p>
+          <ul id="sharePapers" class="checks"></ul>
+          <p><button id="shareStart" class="primary">Wi‑Fi でスマホに送る</button>
+             <a id="bundleLink" class="btn">ファイルで渡す（zip を保存）</a></p>
+          <div id="shareBox" class="sharebox" hidden>
+            <div class="qrrow"><div id="shareQr" class="qr"></div>
+              <ol>
+                <li>スマホを Mac と<b>同じ Wi‑Fi</b> につなぐ</li>
+                <li>カメラか Chrome でこの QR を読む（<span id="shareUrl" class="mono"></span>）</li>
+                <li>開いた画面で「データを保存」→ app の「データ」→「Mac のデータを読み込む」で zip を選ぶ</li>
+              </ol></div>
+            <p class="muted"><span id="shareExpire"></span> <button id="shareStop" class="small">止める</button></p>
+            <p id="shareReceived" class="muted"></p>
+          </div>
+          <p class="muted">「ファイルで渡す」は zip を Mac に保存します。Google Drive や USB でスマホの「ダウンロード」に入れ、app で読み込んでください。</p>
+        </div>
+        <div class="panel">
+          <h3>3. 復習の記録を戻す（スマホ → Mac）</h3>
+          <ol>
+            <li>スマホの app で「データ」→「記録を書き出す」</li>
+            <li>上の「Wi‑Fi でスマホに送る」で開いた画面の「記録を Mac に送る」で送る。<br>
+                または、書き出した JSON を Mac に移してここで読み込む:
+                <label class="btn">記録ファイルを読み込む<input type="file" id="progressInput" accept=".json,application/json" hidden></label></li>
+          </ol>
+          <p id="progressMsg" class="muted"></p>
+          <p class="muted">同じ記録を何度読み込んでも二重にはなりません。Mac とスマホのどちらで復習しても、答えた時刻の順に計算し直して合わせます。</p>
+        </div>
+      </div>
+    </section>
+
+    <div id="readView" class="view">
     <p id="placeholder" class="muted">左の一覧から論文を選んでください。</p>
     <section id="paper" hidden>
       <h2 id="paperTitle"></h2>
@@ -51,6 +137,7 @@
 
       <ol id="sections" class="sections"></ol>
     </section>
+    </div>
   </main>
 </div>
 

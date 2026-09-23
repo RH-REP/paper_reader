@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#2f6fbd">
+<title>paper_reader</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top"><h1>paper_reader</h1><span id="topInfo" class="muted"></span></header>
+
+<main>
+  <!-- 読む -->
+  <section id="v-read" class="view">
+    <div id="paperPick">
+      <h2>論文</h2>
+      <ul id="paperList" class="list"></ul>
+      <p id="paperEmpty" class="empty" hidden>まだ論文がありません。<br>下の「データ」から、Mac で書き出した zip を読み込んでください。<br><a href="#help">使い方を見る</a></p>
+    </div>
+    <div id="paperView" hidden>
+      <button id="backToList" class="link">← 論文の一覧</button>
+      <h2 id="paperTitle"></h2>
+      <p class="row"><button id="playAll" class="primary">▶ 全体を読む</button>
+        <label class="muted"><input type="checkbox" id="skipBack" checked> 後付けを飛ばす</label></p>
+      <ol id="sections" class="sections"></ol>
+    </div>
+  </section>
+
+  <!-- 復習 -->
+  <section id="v-review" class="view" hidden>
+    <p id="revCounts" class="counts"></p>
+    <div id="revCard" class="card" hidden>
+      <div class="hw"><span id="revWord"></span> <button id="revSay" class="icon" title="発音">🔈</button></div>
+      <div id="revExamples" class="examples"></div>
+      <div id="revBack" class="back" hidden><div id="revMeaning" class="meaning"></div><p id="revSource" class="muted"></p></div>
+    </div>
+    <p id="revDone" class="empty" hidden></p>
+    <div id="revActions" class="actions" hidden>
+      <button id="revShow" class="primary wide">答えを見る</button>
+      <div id="revButtons" class="rate" hidden>
+        <button data-r="1" class="r1">もう一度<small></small></button>
+        <button data-r="2" class="r2">難しい<small></small></button>
+        <button data-r="3" class="r3">正解<small></small></button>
+        <button data-r="4" class="r4">簡単<small></small></button>
+      </div>
+    </div>
+    <p class="center"><button id="revUndo" class="link">↶ 1つ前の答えを取り消す</button></p>
+  </section>
+
+  <!-- 単語帳 -->
+  <section id="v-words" class="view" hidden>
+    <form id="searchForm" class="search"><input id="searchInput" type="search" placeholder="英単語を引く" autocomplete="off" autocapitalize="off" spellcheck="false"></form>
+    <h2>単語帳 <span id="wordCount" class="muted"></span></h2>
+    <ul id="wordList" class="list words"></ul>
+    <p id="wordEmpty" class="empty" hidden>論文の文の中の単語をタップすると、ここに貯まります。</p>
+  </section>
+
+  <!-- データ -->
+  <section id="v-data" class="view" hidden>
+    <div class="panel">
+      <h3>Mac のデータを読み込む</h3>
+      <p class="muted">Mac の paper_reader の「スマホ」で書き出した zip（論文・音声・単語帳・Mac での復習の記録）。</p>
+      <label class="btn primary">zip を選ぶ<input type="file" id="importInput" accept=".zip,application/zip" hidden></label>
+      <p id="importMsg" class="muted"></p>
+    </div>
+    <div class="panel">
+      <h3>記録を書き出す（Mac に戻す）</h3>
+      <p class="muted">このスマホで引いた単語と復習の答え。Mac で読み込むと合わさります（何度送っても二重になりません）。</p>
+      <button id="exportBtn" class="btn primary">記録を書き出す</button>
+      <p id="exportMsg" class="muted"></p>
+    </div>
+    <div class="panel">
+      <h3>このスマホに入っているもの</h3>
+      <ul id="stats" class="plain"></ul>
+      <p><button id="dictBtn" class="btn">辞書をオフライン用に保存（約5MB）</button></p>
+      <p><button id="wipeBtn" class="btn danger">このスマホのデータをすべて消す</button></p>
+    </div>
+  </section>
+
+  <!-- 使い方 -->
+  <section id="v-help" class="view help" hidden>
+    <h2>Android での使い方</h2>
+    <h3>1. app を入れる（最初の1回）</h3>
+    <ol>
+      <li>Android の <b>Chrome</b> でこのページを開く（Mac の paper_reader の「スマホ」に出る QR を読むと開けます）。</li>
+      <li>右上の <b>︙</b> →「<b>ホーム画面に追加</b>」または「<b>アプリをインストール</b>」。</li>
+      <li>ホーム画面の <b>paper_reader</b> から開く。以後は電波がなくても動きます。</li>
+    </ol>
+    <h3>2. 論文と単語帳を写す（Mac → スマホ）</h3>
+    <ol>
+      <li>Mac の paper_reader で「スマホ」→ 送る論文を選んで「<b>Wi‑Fi でスマホに送る</b>」。</li>
+      <li>スマホを Mac と<b>同じ Wi‑Fi</b> につなぎ、Mac に出た QR をカメラで読む。</li>
+      <li>開いた画面の「<b>データを保存</b>」で zip を保存（「ダウンロード」に入ります）。</li>
+      <li>この app の「<b>データ</b>」→「<b>zip を選ぶ</b>」で、保存した zip を選ぶ。</li>
+    </ol>
+    <p class="muted">Wi‑Fi が使えないときは、Mac の「ファイルで渡す」で zip を保存し、Google Drive や USB でスマホに移してから同じように選びます。</p>
+    <h3>3. 聞く</h3>
+    <ul>
+      <li>「読む」で論文を選び、章の ▶ でその章、「全体を読む」で最初から。下の再生バーで一時停止・前後の文・速さ。</li>
+      <li>画面を消しても続きます。ロック画面や通知から一時停止・次の文へ進めます。</li>
+      <li>文の中の単語をタップすると辞書が出て、単語帳に入ります。</li>
+    </ul>
+    <h3>4. 復習する</h3>
+    <ul>
+      <li>「復習」で単語と、それを引いた論文の文が出ます。意味を思い出してから「答えを見る」。</li>
+      <li>思い出せた度合いで4つから選ぶ。<b>もう一度</b>＝思い出せない、<b>難しい</b>＝なんとか、<b>正解</b>＝少し考えて（迷ったらこれ）、<b>簡単</b>＝すぐ。</li>
+      <li>ボタンの下の時間は、次にその単語が出るまでの間隔です（FSRS。Anki と同じ方式）。新しい単語は1日20語まで。</li>
+    </ul>
+    <h3>5. 記録を Mac に戻す（スマホ → Mac）</h3>
+    <ol>
+      <li>「データ」→「<b>記録を書き出す</b>」。共有の画面が出たら Google Drive などに保存、出なければ「ダウンロード」に保存されます。</li>
+      <li>Mac で「Wi‑Fi でスマホに送る」を開いているなら、スマホでその画面の「<b>記録を Mac に送る</b>」で送れます。
+        または、ファイルを Mac に移して paper_reader の「スマホ」→「記録ファイルを読み込む」。</li>
+      <li>Mac とスマホのどちらで復習しても、答えた時刻の順に計算し直して合わせます。</li>
+    </ol>
+    <h3>データの置き場所</h3>
+    <p class="muted">論文・音声・単語帳・記録はこのスマホの中（ブラウザの保存領域）にだけ置き、どこにも送りません。
+      Chrome の「サイトのデータを削除」をすると消えます。辞書は EJDict-hand（パブリックドメイン）。</p>
+    <p class="muted" id="version"></p>
+  </section>
+</main>
+
+<!-- 再生バー -->
+<div id="player" class="player" hidden>
+  <p id="nowText" class="now"></p>
+  <div class="prow">
+    <button id="prev" class="icon" title="前の文">⏮</button>
+    <button id="pause" class="icon big" title="一時停止／再開">⏸</button>
+    <button id="next" class="icon" title="次の文">⏭</button>
+    <button id="stop" class="icon" title="停止">■</button>
+    <label class="speed"><input type="range" id="speed" min="0.7" max="2" step="0.05" value="1"><span id="speedVal">1.00×</span></label>
+  </div>
+  <p id="status" class="muted small"></p>
+</div>
+
+<!-- 辞書 -->
+<div id="sheet" class="sheet" hidden>
+  <div class="sheet-head"><b id="wcWord"></b> <span id="wcNote" class="tag"></span>
+    <button id="wcSay" class="icon" title="発音">🔈</button><button id="sheetClose" class="icon close">×</button></div>
+  <div id="wcMeans" class="means"></div>
+  <p class="muted small"><span id="wcSource"></span> <a id="wcWeblio" target="_blank" rel="noopener">Weblio ↗</a></p>
+</div>
+
+<nav class="tabs">
+  <a href="#read" data-v="read">📖<span>読む</span></a>
+  <a href="#review" data-v="review">🔁<span>復習</span><i id="dueBadge" hidden></i></a>
+  <a href="#words" data-v="words">📒<span>単語帳</span></a>
+  <a href="#data" data-v="data">⇅<span>データ</span></a>
+  <a href="#help" data-v="help">？<span>使い方</span></a>
+</nav>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

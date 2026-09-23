@@ -324,7 +324,7 @@ async function lookup(word, ctx = {}) {
   if (ctx.sentence) qs.set("sentence", ctx.sentence);
   const r = await api(`/api/lookup?${qs}`);
   showWord(r);
-  if (r.vocab_id) loadVocab();
+  if (r.vocab_id) { loadVocab(); refreshDue(); }
 }
 
 function showWord(r) {
@@ -411,6 +411,173 @@ async function loadConfig() {
   if (!S.cfg.dict) $("searchInput").placeholder = "辞書が未作成（README 参照）";
 }
 
+// ---- 画面の切り替え ----
+function showView(v) {
+  S.view = v;
+  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.view === v));
+  $("readView").hidden = v !== "read";
+  $("reviewView").hidden = v !== "review";
+  $("phoneView").hidden = v !== "phone";
+  if (v !== "read") stop();
+  if (v === "review") loadReview();
+  if (v === "phone") loadPhone();
+  pref.set("view", v);
+}
+document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => showView(b.dataset.view)));
+
+// ---- 復習（計算はサーバーの py-fsrs） ----
+const RATING_KEYS = { "1": 1, "2": 2, "3": 3, "4": 4 };
+function renderCounts(c) {
+  $("revCounts").innerHTML = `新しい語 <b class="n">${c.new}</b> ・ 覚えている途中 <b class="l">${c.learning}</b> ・ 復習 <b class="v">${c.review}</b>`
+    + ` <span class="muted">（単語帳 ${c.total} 語${c.new_waiting > c.new ? `、明日以降の新しい語 ${c.new_waiting - c.new}` : ""}）</span>`;
+  const due = c.new + c.learning + c.review;
+  $("dueBadge").hidden = !due;
+  $("dueBadge").textContent = due;
+}
+
+async function refreshDue() { renderCounts((await api("/api/review")).counts); }
+
+function markWord(text, head) {
+  const el = document.createElement("span");
+  const re = new RegExp(`\\b(${head.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\w*)`, "i");
+  const parts = text.split(re);
+  parts.forEach((p, i) => {
+    if (i % 2) { const m = document.createElement("mark"); m.textContent = p; el.appendChild(m); }
+    else el.appendChild(document.createTextNode(p));
+  });
+  return el;
+}
+
+function renderReview(q) {
+  S.review = q;
+  renderCounts(q.counts);
+  const c = q.card;
+  $("revCard").hidden = !c;
+  $("revDone").hidden = !!c;
+  if (!c) {
+    const nd = q.next_due ? new Date(q.next_due) : null;
+    $("revDone").textContent = q.counts.total === 0
+      ? "単語帳が空です。「読む」で文の中の単語をクリックすると、引いた単語がここに入ります。"
+      : `今の分は終わりです。${nd ? `次は ${nd.toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} に出ます。` : ""}`;
+    return;
+  }
+  $("revWord").textContent = c.headword;
+  const ex = $("revExamples");
+  ex.textContent = "";
+  for (const e of c.examples) {
+    const d = document.createElement("div");
+    d.appendChild(markWord(e.sentence, c.headword));
+    if (e.audio_ref) {
+      const b = document.createElement("button");
+      b.className = "small";
+      b.textContent = "🔈 文";
+      b.onclick = () => { const [pid, item] = e.audio_ref.split("/"); playOnce(`/api/papers/${pid}/audio/${item}.m4a`); };
+      d.append(" ", b);
+    }
+    if (e.section) {
+      const s = document.createElement("span");
+      s.className = "src";
+      s.textContent = e.section;
+      d.appendChild(s);
+    }
+    ex.appendChild(d);
+  }
+  $("revMeaning").textContent = "";
+  for (const line of c.meaning.split(/\n| \/ /)) {
+    const d = document.createElement("div");
+    d.textContent = line;
+    $("revMeaning").appendChild(d);
+  }
+  $("revSource").textContent = `${c.source || ""} ・ これまで ${c.reviews} 回答えた`;
+  document.querySelectorAll("#revButtons button").forEach((b) => { b.querySelector("small").textContent = c.intervals[b.dataset.r]; });
+  $("revBack").hidden = true;
+  $("revButtons").hidden = true;
+  $("revShow").hidden = false;
+}
+
+function playOnce(src) { S.wordAudio.src = src; S.wordAudio.play().catch(() => {}); }
+
+async function loadReview() { renderReview(await api("/api/review")); }
+function revealAnswer() { if (!S.review?.card) return; $("revBack").hidden = false; $("revButtons").hidden = false; $("revShow").hidden = true; }
+async function rate(r) {
+  const c = S.review?.card;
+  if (!c || $("revButtons").hidden) return;
+  renderReview(await post("/api/review/answer", { headword: c.headword, rating: r }));
+}
+async function undoReview() {
+  const q = await post("/api/review/undo");
+  renderReview(q);
+  if (!q.undone) $("revDone").textContent = "取り消せる答えがありません。";
+}
+function reviewKey(e) {
+  if (e.code === "Space" || e.key === "Enter") { e.preventDefault(); if ($("revButtons").hidden) revealAnswer(); else rate(3); }
+  else if (RATING_KEYS[e.key]) rate(RATING_KEYS[e.key]);
+  else if (e.key === "z" || e.key === "Z") undoReview();
+}
+$("revShow").onclick = revealAnswer;
+document.querySelectorAll("#revButtons button").forEach((b) => (b.onclick = () => rate(Number(b.dataset.r))));
+$("revUndo").onclick = undoReview;
+$("revSay").onclick = () => S.review?.card && playOnce(`/api/word_audio?w=${encodeURIComponent(S.review.card.headword)}`);
+
+// ---- スマホ（Android）----
+async function loadPhone() {
+  const url = S.cfg?.pwa_url || "";
+  $("pwaLink").href = url;
+  $("pwaLink").textContent = url;
+  $("pwaQr").innerHTML = await (await fetch(`/api/qr?t=${encodeURIComponent(url)}`)).text();
+  const ul = $("sharePapers");
+  ul.innerHTML = "";
+  const want = new Set(pref.get("sharePapers", S.paper ? [S.paper.id] : []));
+  for (const m of S.papers) {
+    const li = document.createElement("li");
+    li.innerHTML = `<label><input type="checkbox" value="${m.id}"> <span></span></label>`;
+    li.querySelector("input").checked = want.has(m.id);
+    li.querySelector("span").textContent = `${m.title}（${m.sentences}文）`;
+    li.querySelector("input").onchange = updateBundleLink;
+    ul.appendChild(li);
+  }
+  updateBundleLink();
+  renderShare(await api("/api/share"));
+}
+function sharePicked() { return [...document.querySelectorAll("#sharePapers input:checked")].map((i) => i.value); }
+function updateBundleLink() {
+  const ids = sharePicked();
+  pref.set("sharePapers", ids);
+  $("bundleLink").href = `/api/bundle?papers=${ids.join(",")}`;
+}
+function renderShare(st) {
+  clearInterval(S.sharePoll);
+  $("shareBox").hidden = !st.active;
+  if (!st.active) return;
+  $("shareQr").innerHTML = st.qr;
+  $("shareUrl").textContent = st.url;
+  $("shareExpire").textContent = `${st.expires_at} まで開いています（${st.zip}、${st.zip_mb} MB）`;
+  $("shareReceived").textContent = st.received.length
+    ? "スマホから受け取った記録: " + st.received.map((r) => `引いた語 ${r.lookups}・答え ${r.reviews}`).join(" / ") : "";
+  S.sharePoll = setInterval(async () => {
+    if (S.view !== "phone") return;
+    const s2 = await api("/api/share").catch(() => ({ active: false }));
+    if (!s2.active || s2.received.length !== st.received.length) { renderShare(s2); refreshDue(); loadVocab(); }
+  }, 3000);
+}
+$("shareStart").onclick = async () => {
+  $("shareStart").disabled = true;
+  try { renderShare(await post("/api/share/start", { papers: sharePicked() })); }
+  catch (e) { alert(e.message); }
+  finally { $("shareStart").disabled = false; }
+};
+$("shareStop").onclick = async () => renderShare(await post("/api/share/stop"));
+$("progressInput").onchange = async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  try {
+    const r = await api("/api/progress", { method: "POST", body: f });
+    $("progressMsg").textContent = `読み込みました: 引いた語 ${r.lookups} 件・答え ${r.reviews} 件を追加`;
+    refreshDue(); loadVocab();
+  } catch (err) { $("progressMsg").textContent = "読み込めませんでした: " + err.message; }
+};
+
 // ---- つなぎこみ ----
 $("playAll").onclick = () => S.paper && play(itemsFor(null));
 $("pause").onclick = pauseResume;
@@ -436,8 +603,10 @@ $("searchForm").onsubmit = (e) => {
 };
 $("wordClose").onclick = () => { $("wordCard").hidden = true; };
 document.addEventListener("keydown", (e) => {
-  if (e.code === "Space" && !/INPUT|SELECT|TEXTAREA|BUTTON/.test(e.target.tagName)) { e.preventDefault(); pauseResume(); }
-  if (e.key === "Escape") $("wordCard").hidden = true;
+  if (/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+  if (e.key === "Escape") { $("wordCard").hidden = true; return; }
+  if (S.view === "review") return reviewKey(e);
+  if (e.code === "Space" && e.target.tagName !== "BUTTON") { e.preventDefault(); pauseResume(); }
 });
 let dragDepth = 0;
 addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; $("drop").hidden = false; });
@@ -447,4 +616,6 @@ addEventListener("drop", (e) => { e.preventDefault(); dragDepth = 0; $("drop").h
 
 loadConfig().catch(() => {});
 loadVocab().catch(() => {});
+refreshDue().catch(() => {});
 loadPapers().catch((e) => status("サーバーにつながりません: " + e.message));
+showView(pref.get("view", "read"));

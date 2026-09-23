@@ -76,6 +76,44 @@ button:disabled{opacity:.5;cursor:default}
 .wc-foot a{color:var(--accent)}
 .drop{position:fixed;inset:12px;border:3px dashed var(--accent);border-radius:16px;background:rgba(47,111,189,.12);
       display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--ink);z-index:9}
+/* タブ・復習・スマホ */
+.tabs{display:flex;gap:4px}
+.tabs button{border-radius:99px;padding:4px 14px}
+.tabs button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.badge{display:inline-block;min-width:18px;padding:0 5px;border-radius:99px;background:#d9534f;color:#fff;font-size:11px;line-height:18px}
+kbd{font:11px ui-monospace,Menlo,monospace;border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-left:6px;color:var(--muted)}
+.counts{font-size:14px;color:var(--ink2)}
+.counts b{font-size:16px}
+.counts .n{color:#2f6fbd}.counts .l{color:#c0392b}.counts .v{color:#27ae60}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;max-width:720px}
+.hw{font-size:30px;font-weight:600;display:flex;align-items:center;gap:10px}
+.examples{margin-top:12px;font-size:15.5px;line-height:1.7}
+.examples div{padding:6px 0;border-top:1px dashed var(--line)}
+.examples mark{background:var(--word);color:inherit;border-radius:3px;padding:0 2px;font-weight:600}
+.examples .src{display:block;font-size:12px;color:var(--muted)}
+.back{margin-top:14px;padding-top:12px;border-top:2px solid var(--line)}
+.meaning div{padding:3px 0;font-size:16px}
+.actions{margin-top:18px}
+button.wide{width:100%;padding:12px;font-size:16px}
+.rate{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.rate button{padding:10px 4px;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:15px}
+.rate small{font-size:12px;color:var(--muted)}
+.rate kbd{margin:0}
+.r1{border-color:#c0392b!important}.r2{border-color:#d68910!important}.r3{border-color:#27ae60!important}.r4{border-color:#2f6fbd!important}
+.done{font-size:16px;padding:18px;background:var(--panel);border:1px solid var(--line);border-radius:12px;max-width:720px}
+.howto{margin-top:16px;max-width:720px;font-size:14px}
+.grid2{display:grid;gap:14px;max-width:820px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 18px}
+.panel h3{margin:0 0 8px;font-size:15.5px}
+.panel ol{padding-left:20px;margin:6px 0}
+.qrrow{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
+.qr svg{width:150px;height:150px;display:block;background:#fff;border-radius:6px}
+.checks{list-style:none;padding:0;margin:4px 0}
+.checks li{font-size:14px;padding:2px 0}
+.sharebox{border:2px solid var(--accent);border-radius:10px;padding:10px 12px;margin:8px 0}
+.mono{font:12px ui-monospace,Menlo,monospace;word-break:break-all}
+a.btn{display:inline-block;text-decoration:none}
+
 @media (max-width:720px){
   .layout{grid-template-columns:1fr}
   .side{border-right:0;border-bottom:1px solid var(--line)}

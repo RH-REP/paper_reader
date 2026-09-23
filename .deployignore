@@ -5,3 +5,7 @@ server.log
 /backup/
 /tests/
 /samples/sample_scan.pdf
+# スマホ版（GitHub Pages で配る）と CI は Mac の利用側には要らない
+/pwa/
+/.github/
+/LICENSE

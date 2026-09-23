@@ -1,12 +1,14 @@
-# paper_reader（開発）
+# paper_reader
 
-英語論文の PDF を**章ごと**に分け、Mac の `say` で作った音声ファイル（m4a）で章単位・全体を読み上げるローカル app。
-文中の単語をクリックすると英和辞書（EJDict）で引き、引いた単語は単語帳に自動で入る。
-章ごとの m4a を書き出すので、iPhone・Android にも持ち出して聞ける。単語帳の復習（FSRS）は次の段階で足す。
+英語論文の PDF を**章ごと**に分けて読み上げ、文中で引いた英単語を**単語帳**に貯めて **FSRS**（Anki と同じ方式）で復習するアプリ。
 
-- 利用側：`app/learning/paper_reader/`（起動口・設定・取り込んだ論文）。ここにはコードと架空のサンプルだけを置く
+- **Mac 版**（このリポジトリの直下）: PDF の取り込み・章と文への分割・OCR・読み上げ音声づくり（macOS の `say`）・辞書・単語帳・復習。ブラウザで使うローカルサーバー。
+- **スマホ版**（`pwa/`）: Android の Chrome で動く PWA。Mac で作った論文・音声・単語帳を読み込み、オフラインで聞く・引く・復習する。
+  → **https://rh-rep.github.io/paper_reader/** （GitHub Pages。使い方は app の「使い方」タブ）
 
-## 構成
+論文・音声・単語帳・復習の記録は、使う人の Mac とスマホの中にだけ置きます。このリポジトリにもサーバーにも送りません。
+
+## Mac 版
 
 | ファイル | 役目 |
 |---|---|
@@ -14,37 +16,53 @@
 | `store.py` | `data/papers/<sha8>/` への取り込み（元の PDF はコピーするだけ）・一覧・読み出し |
 | `audio.py` | `say` → WAV → `afconvert` で m4a（AAC）。1文ずつと、持ち出し用の章ごと・全体の1本もの |
 | `lookup.py` | 単語を引く。EJDict → 活用を戻す → 派生語を戻す（近い語）→ Free Dictionary API（英英、ネット） |
-| `vocab.py` | 単語帳（`vocab.sqlite`）。引いて見つかった語を自動で保存。復習用の列（card, due）は空けてある |
-| `server.py` | 画面と API を 127.0.0.1 で配る（標準ライブラリの `http.server`）。取り込むと裏で音声をまとめて作る。音声は Range 対応で配る（Safari 用） |
-| `index.html` `assets/` | 画面。音声ファイルを順に鳴らす。音声ができるまではブラウザの読み上げで代わりに読む |
-| `tools/import_pdf.py` | 画面を使わずに取り込む（音声も作る） |
-| `tools/build_dict.py` | EJDict-hand（CC0）を GitHub から取って `<data_root>/dict/ejdict.sqlite` を作る |
-| `tools/make_sample_pdf.py` | 架空の2段組論文 `samples/sample_paper.pdf` を作る |
-| `tests/` | サンプルでの章・文・引用除去・取り込み・OCR のテスト |
-
-## 開発
+| `vocab.py` | 単語帳（`vocab.sqlite`）。引いた語を自動で保存。答えの記録（reviews）が復習の正本 |
+| `srs.py` | 復習の計算（py-fsrs、FSRS-6 の既定値、fuzz なし）。新しい語は1日20語まで |
+| `bundle.py` | スマホへ渡す zip と、スマホから戻る記録（JSON）の形 |
+| `share.py` | 同じ Wi‑Fi のスマホへの一時的な受け渡しページ（合言葉付きのアドレス、10分で閉じる） |
+| `server.py` | 画面と API を 127.0.0.1 で配る（標準ライブラリの `http.server`） |
+| `index.html` `assets/` | 画面（読む・復習・スマホ） |
+| `tools/` | 取り込み（`import_pdf.py`）、辞書づくり（`build_dict.py` `build_pwa_dict.py`）、架空のサンプル PDF（`make_sample_pdf.py`） |
 
 ```sh
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m unittest discover -s tests -v
-cp config.example.json config.json && .venv/bin/python server.py --config config.json   # samples で試すときは samples/ の PDF を画面から取り込む
+cp config.example.json config.json
+.venv/bin/python tools/build_dict.py --config config.json      # 英和辞書（EJDict-hand、約4.4MB）を取ってくる
+.venv/bin/python server.py --config config.json                # http://127.0.0.1:8796/
 ```
 
-- 実在の論文はここに入れない。実データで確かめるときは `app/learning/paper_reader/` に複製して、そこで取り込む。
-- OCR には Tesseract（`brew install tesseract`、英語データ `eng`）が要る。無ければ文字層の無いページは飛ばす。
-- 音声は macOS の `say` と `afconvert` を使う（どちらも標準）。論文1本（10ページ・162本）で約1分40秒（4並列）。
-- 辞書は `tools/build_dict.py` で作る。テストは架空の小さな辞書を作って使う。
-- 直したら `app/learning/paper_reader/update.command` で複製する。`data/` `config.json` は複製されない（`.deployignore`）。
+- 必要なもの: macOS（`say` と `afconvert`）、Python 3.11 以上。OCR を使うなら Tesseract（`brew install tesseract`）。
+- データは `config.json` の `data_root`（既定 `data/`）に置く。
 
-## 章の分け方の前提
+## スマホ版（`pwa/`）
 
-- 本文の文字サイズ（文字数で重みをつけた最頻値）より小さい行は読まない（図表の説明・欄外・注）。
-- 3ページ以上の上下余白に同じ文字列が出たら、ヘッダー・フッターとして捨てる。
-- 2段組は、行の左端がページ幅の 45% より右なら右の段とみなす。
-- `REFERENCES` `ACKNOWLEDGMENTS` `FUNDING` などから後ろは「後付け」。全体を読むときに飛ばせる。
-- 読み上げ（音声ファイル）では `(Smith et al., 2020)` のような年入りの括弧と `[12]` 型の引用を落とす（画面の表示はそのまま）。
-- 取り出し方を変えたら `extract.EXTRACTOR_VERSION` を上げる。開いたときに作り直される。
+| ファイル | 役目 |
+|---|---|
+| `index.html` `app.css` `js/app.js` | 画面（読む・復習・単語帳・データ・使い方） |
+| `js/srs.js` | 復習の計算。py-fsrs の `review_card` を写したもの（Mac と同じ記録から同じ結果になる。`tests/test_pwa_parity.py`） |
+| `js/lookup.js` | 単語を引く（Mac 版と同じ順）。辞書は `dict/<頭文字>.json` |
+| `js/db.js` | IndexedDB への保存 |
+| `js/zip.js` | Mac から来る zip（無圧縮）を読む |
+| `sw.js` `manifest.webmanifest` `icons/` | オフライン動作とホーム画面への追加 |
 
-## ライセンスの注意
+`pwa/dict/` は GitHub Actions（`.github/workflows/pages.yml`）が EJDict から作って Pages に載せます（リポジトリには入れない）。
 
-PyMuPDF は AGPL。手元で使う分には問題ない。GitHub に公開するならソース公開が前提になる（registry では `github_allowed: false`）。
+### Mac とスマホの受け渡し
+
+- **Mac → スマホ**: Mac の「スマホ」で論文を選び「Wi‑Fi でスマホに送る」→ スマホで QR を読んで zip を保存 → PWA の「データ」で読み込む。「ファイルで渡す」で zip を保存して Google Drive などで移してもよい。
+- **スマホ → Mac**: PWA の「データ」→「記録を書き出す」→ 受け渡しページの「記録を Mac に送る」か、Mac の「記録ファイルを読み込む」。
+- 復習の状態は保存せず、両方の答えの記録（uid 付き）を時刻順に計算し直して作る。同じ記録を何度読み込んでも二重にならない。
+
+## テスト
+
+```sh
+.venv/bin/python -m unittest discover -s tests -v
+```
+
+架空のサンプル PDF（`samples/`、`tools/make_sample_pdf.py` で作る）と、テストの中で作る小さな架空の辞書を使います。
+
+## ライセンス
+
+- このリポジトリ: AGPL-3.0（PyMuPDF が AGPL のため）
+- 英和辞書 EJDict-hand: パブリックドメイン（CC0） https://github.com/kujirahand/EJDict
+- `pwa/js/srs.js` は py-fsrs（MIT、Copyright (c) 2022 Open Spaced Repetition）の計算を写したもの
