@@ -116,6 +116,7 @@
       <h2 id="paperTitle"></h2>
       <p id="paperMeta" class="muted"></p>
       <p id="audioLine" class="audioline"></p>
+      <p id="trLine" class="audioline"></p>
 
       <div class="player">
         <div class="row">
@@ -134,6 +135,7 @@
         <div class="row opts">
           <label>再生速度 <input type="range" id="speed" min="0.7" max="2" step="0.05" value="1"> <span id="speedVal">1.00</span>×</label>
           <label><input type="checkbox" id="skipBack" checked> 後付け（References など）を「全体」で読まない</label>
+          <label><input type="checkbox" id="showJa" checked> 訳を表示</label>
           <label>声 <select id="voice"></select></label>
           <button id="regen" class="small" hidden>この声で作り直す</button>
         </div>

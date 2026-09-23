@@ -60,6 +60,8 @@ button:disabled{opacity:.5;cursor:default}
 .sec summary{cursor:pointer;font-size:12.5px;color:var(--muted)}
 .sec ol{margin:6px 0 0;padding-left:22px;font-size:14.5px;color:var(--ink)}
 .sec ol li{margin:4px 0}
+.sec ol li .ja{font-size:13px;color:var(--ink2);margin:2px 0 6px;padding-left:2px}
+.hide-ja .ja{display:none}
 .sec ol li .sp{font-size:11px;padding:0 6px;margin-right:6px;border-radius:99px;vertical-align:1px;color:var(--accent)}
 button.seek{font-size:12.5px;padding:5px 8px}
 .w{cursor:pointer;border-radius:3px}

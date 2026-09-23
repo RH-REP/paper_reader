@@ -5,7 +5,7 @@ import { lookup } from "./lookup.js";
 import * as srs from "./srs.js";
 import { unzipStored, text } from "./zip.js";
 
-const VERSION = "3";
+const VERSION = "5";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
@@ -112,6 +112,8 @@ async function openPaper(id) {
         const t = document.createElement("span");
         fillWords(t, s.t);
         x.appendChild(t);
+        const ja = p.ja?.[`${sec.id}_${k + 1}`];
+        if (ja) { const j = document.createElement("div"); j.className = "ja"; j.textContent = ja; x.appendChild(j); }
         list.appendChild(x);
       });
       det.append(sum, list);
@@ -442,7 +444,9 @@ async function importBundle(file) {
   for (const pid of man.papers) {
     const meta = JSON.parse(text(files.get(`papers/${pid}/meta.json`)));
     const paper = JSON.parse(text(files.get(`papers/${pid}/sentences.json`)));
-    const entries = [["papers", pid, { id: pid, meta, paper }]];
+    const tr = files.get(`papers/${pid}/translation.json`);
+    const ja = tr ? JSON.parse(text(tr)).items || {} : {};          // 文ごとの日本語訳（Mac で作ったもの）
+    const entries = [["papers", pid, { id: pid, meta, paper, ja }]];
     for (const [name, bytes] of files) {
       const m = name.match(/^papers\/([0-9a-f]{8})\/audio\/([A-Za-z0-9_]+)\.m4a$/);
       if (m && m[1] === pid) { entries.push(["audio", `${pid}/${m[2]}`, new Blob([bytes], { type: "audio/mp4" })]); nAudio++; }
@@ -542,6 +546,10 @@ $("wipeBtn").onclick = async () => {
 async function init() {
   S.device = (await kv("device")) || `phone-${uid().slice(0, 8)}`;
   await kv("device", S.device);
+  const showJa = (await kv("show_ja")) ?? true;
+  $("showJa").checked = showJa;
+  $("sections").classList.toggle("hide-ja", !showJa);
+  $("showJa").onchange = () => { kv("show_ja", $("showJa").checked); $("sections").classList.toggle("hide-ja", !$("showJa").checked); };
   const sp = await kv("speed");
   if (sp) { $("speed").value = sp; $("speedVal").textContent = `${Number(sp).toFixed(2)}×`; }
   $("version").textContent = `版 ${VERSION} ・ この機器の名前 ${S.device}`;
@@ -550,7 +558,15 @@ async function init() {
   if (last && S.papers.some((p) => p.id === last)) openPaper(last);
   refreshBadge();
   route();
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  if ("serviceWorker" in navigator) {
+    // 新しい版の Service Worker に切り替わったら1回だけ読み直す（新しい画面と古いプログラムが混ざらないように）
+    const had = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (had && !reloaded) { reloaded = true; location.reload(); }
+    });
+    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
+  }
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});   // 容量が足りなくなっても消されにくくする
 }
 init();

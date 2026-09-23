@@ -91,6 +91,46 @@ async function openPaper(id) {
   renderSections();
   renderAudio();
   watchAudio();
+  renderTranslation();
+  watchTranslation();
+}
+
+// ---- 文ごとの日本語訳（macOS 内蔵の翻訳。端末内）----
+function renderTranslation() {
+  const t = S.paper.translation || { state: "none" };
+  const line = $("trLine");
+  line.textContent = "";
+  const span = document.createElement("span");
+  const msg = { done: `訳: ${Object.keys(S.paper.ja || {}).length} 文（Mac 内蔵の翻訳）`,
+                running: `訳を作っています ${t.done} / ${t.total}`,
+                need_install: `訳: 英語・日本語の翻訳データが Mac に入っていません。${t.error || ""}`,
+                unsupported: "訳: この Mac では英語→日本語の翻訳が使えません",
+                error: `訳を作れませんでした: ${t.error || ""}`, none: "訳はまだありません" }[t.state] || "";
+  span.textContent = msg;
+  line.appendChild(span);
+  if (t.state !== "running") {
+    const b = document.createElement("button");
+    b.className = "small";
+    b.textContent = "訳を作り直す";
+    b.onclick = async () => { await post(`/api/papers/${S.paper.id}/translate`); S.paper.translation = { state: "running", done: 0, total: 0 }; renderTranslation(); watchTranslation(); };
+    line.appendChild(b);
+  }
+}
+
+function watchTranslation() {
+  clearInterval(S.trPoll);
+  if (S.paper?.translation?.state !== "running") return;
+  const id = S.paper.id;
+  S.trPoll = setInterval(async () => {
+    if (!S.paper || S.paper.id !== id) return clearInterval(S.trPoll);
+    const t = await api(`/api/papers/${id}/translation`).catch(() => null);
+    if (!t) return;
+    S.paper.ja = t.ja;
+    delete t.ja;
+    S.paper.translation = t;
+    renderTranslation();
+    if (t.state !== "running") { clearInterval(S.trPoll); renderSections(); }
+  }, 2000);
 }
 
 function chapterFile(sec) {
@@ -149,6 +189,13 @@ function renderSections() {
         const t = document.createElement("span");
         fillWords(t, s.t);
         x.appendChild(t);
+        const ja = S.paper.ja?.[`${sec.id}_${k + 1}`];
+        if (ja) {
+          const j = document.createElement("div");
+          j.className = "ja";
+          j.textContent = ja;
+          x.appendChild(j);
+        }
         list.appendChild(x);
       });
       det.append(sum, list);
@@ -643,6 +690,9 @@ $("pause").onclick = pauseResume;
 $("stop").onclick = stop;
 $("prev").onclick = () => step(-1);
 document.querySelectorAll("[data-seek]").forEach((b) => (b.onclick = () => seekBy(Number(b.dataset.seek))));
+// 再生バーのボタンと速さの棒に入力を残さない（押したあとのスペース・← → が、そのボタンや速さに効いてしまうため）
+document.querySelectorAll(".player button").forEach((b) => b.addEventListener("mousedown", (e) => e.preventDefault()));
+$("speed").addEventListener("change", () => $("speed").blur());
 $("next").onclick = () => step(1);
 $("speed").value = pref.get("speed", 1);
 $("speedVal").textContent = Number($("speed").value).toFixed(2);
@@ -654,6 +704,9 @@ $("speed").oninput = () => {
 $("voice").onchange = renderAudio;
 $("regen").onclick = regenerate;
 $("skipBack").checked = pref.get("skipBack", true);
+$("showJa").checked = pref.get("showJa", true);
+$("sections").classList.toggle("hide-ja", !$("showJa").checked);
+$("showJa").onchange = () => { pref.set("showJa", $("showJa").checked); $("sections").classList.toggle("hide-ja", !$("showJa").checked); };
 $("skipBack").onchange = () => pref.set("skipBack", $("skipBack").checked);
 $("importInput").onchange = (e) => { importFiles(e.target.files); e.target.value = ""; };
 $("searchForm").onsubmit = (e) => {

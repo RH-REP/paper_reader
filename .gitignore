@@ -10,3 +10,4 @@ samples/sample_scan.pdf
 # スマホ版の辞書は GitHub Actions で作る（tools/build_pwa_dict.py）
 pwa/dict/
 pwa/_*
+.bin/

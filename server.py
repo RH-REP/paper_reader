@@ -12,6 +12,7 @@
   GET  /api/papers/<id>                 章と文（sentences.json）＋ audio（音声の作成状態）
   POST /api/papers/<id>/reextract       章と文を作り直し、音声も作り直す
   POST /api/papers/<id>/audio           音声を今の声・速さで作り直す
+  POST /api/papers/<id>/translate       文ごとの日本語訳を作り直す（macOS 内蔵の翻訳。端末内）
   POST /api/papers/<id>/reveal          持ち出し用の音声フォルダ（export/）を Finder で開く
   GET  /api/papers/<id>/audio/<item>.m4a    1文ずつの音声
   GET  /api/papers/<id>/export/<file>.m4a   章ごとの音声
@@ -49,6 +50,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import audio  # noqa: E402
 import bundle  # noqa: E402
+import translate  # noqa: E402
 from lookup import Dictionary  # noqa: E402
 from share import ShareServer  # noqa: E402
 from store import Store  # noqa: E402
@@ -135,12 +137,32 @@ class App:
             t.start()
             return True
 
+    def start_translate(self, pid: str, force=False) -> bool:
+        """その論文の日本語訳づくりを裏で始める（音声とは別の仕事として並べて走る）。"""
+        key = f"tr-{pid}"
+        with self.lock:
+            t = self.jobs.get(key)
+            if t and t.is_alive():
+                return False
+            d = self.store.paper_dir(pid)
+            paper = self.store.load(pid)
+            st = translate.status(d)
+            if not force and st.get("state") in ("done", "need_install", "unsupported", "error") \
+                    and st.get("extractor_version") == paper.get("extractor_version"):
+                return False
+            t = threading.Thread(target=translate.generate, args=(d, paper), daemon=True, name=key)
+            self.jobs[key] = t
+            t.start()
+            return True
+
     def resume_pending(self):
-        """起動時: 音声がまだ無い・途中で止まった論文の音声づくりを始める。"""
+        """起動時: 音声・訳がまだ無い・途中で止まった論文の仕事を始める。"""
         for m in self.store.list():
-            st = audio.status(self.store.paper_dir(m["id"]))
-            if st.get("state") in ("none", "running"):
+            d = self.store.paper_dir(m["id"])
+            if audio.status(d).get("state") in ("none", "running"):
                 self.start_audio(m["id"], force=True)
+            if translate.status(d).get("state") in ("none", "running"):
+                self.start_translate(m["id"], force=True)
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -227,7 +249,16 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             paper = app.store.load(m.group(1))
             app.start_audio(m.group(1))                  # 無い・古いときだけ始まる
-            return self._json({**paper, "audio": audio.status(d)})
+            app.start_translate(m.group(1))
+            tr = translate.status(d)
+            return self._json({**paper, "audio": audio.status(d), "ja": tr.pop("items", {}), "translation": tr})
+        m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/translation", path)
+        if m:
+            d = self._paper_dir(m.group(1))
+            if not d:
+                return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            tr = translate.status(d)
+            return self._json({**tr, "ja": tr.pop("items", {})})
         m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/audio", path)
         if m:
             d = self._paper_dir(m.group(1))
@@ -304,7 +335,7 @@ class Handler(SimpleHTTPRequestHandler):
             rate = int(rate) if isinstance(rate, (int, float)) and 90 <= rate <= 360 else None
             app.save_config(voice, rate)
             return self._json({"voice": app.cfg["voice"], "rate": app.cfg["rate"]})
-        m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/(reextract|audio|reveal)", path)
+        m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/(reextract|audio|reveal|translate)", path)
         if m:
             pid, act = m.groups()
             d = self._paper_dir(pid)
@@ -313,7 +344,10 @@ class Handler(SimpleHTTPRequestHandler):
             if act == "reextract":
                 meta = app.store.reextract(pid)
                 app.start_audio(pid, force=True)
+                app.start_translate(pid, force=True)
                 return self._json(meta)
+            if act == "translate":
+                return self._json({"started": app.start_translate(pid, force=True)})
             if act == "audio":
                 started = app.start_audio(pid, force=True)
                 return self._json({"started": started, **audio.status(d)})
@@ -383,7 +417,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json({"error": f"取り込めなかった: {e}"}, HTTPStatus.UNPROCESSABLE_ENTITY)
             finally:
                 tmp.unlink(missing_ok=True)
-            app.start_audio(meta["id"])                  # 取り込んだらすぐ音声をまとめて作る
+            app.start_audio(meta["id"])                  # 取り込んだらすぐ音声と訳をまとめて作る
+            app.start_translate(meta["id"])
             return self._json(meta)
         self.send_error(HTTPStatus.NOT_FOUND)
 

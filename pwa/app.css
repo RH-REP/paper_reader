@@ -46,6 +46,8 @@ button,.btn{font:inherit;font-size:15px;padding:9px 14px;border-radius:10px;bord
 .sec summary{color:var(--muted);font-size:13.5px;padding:4px 0}
 .sec ol{padding-left:20px;margin:4px 0;font-size:15.5px}
 .sec ol li{margin:6px 0}
+.sec ol li .ja{font-size:13.5px;color:var(--ink2);margin:2px 0 8px}
+.hide-ja .ja{display:none}
 .sec ol li .sp{font-size:11px;padding:1px 8px;margin-right:6px;border-radius:99px;vertical-align:1px;color:var(--accent)}
 .seek{font-size:13px;padding:6px 7px;border-radius:8px;min-width:38px}
 .w{border-radius:3px}

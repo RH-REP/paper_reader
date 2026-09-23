@@ -9,3 +9,4 @@ server.log
 /pwa/
 /.github/
 /LICENSE
+/.bin/

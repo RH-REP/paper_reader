@@ -15,6 +15,7 @@
 | `extract.py` | PDF → 題名・章・文。文字層が無いページは Tesseract で OCR。見出しはフォント（太字・本文より大きい）で見分け、OCR ページは「1 INTRODUCTION」型の番号で見分ける |
 | `store.py` | `data/papers/<sha8>/` への取り込み（元の PDF はコピーするだけ）・一覧・読み出し |
 | `audio.py` | `say` → WAV → `afconvert` で m4a（AAC）。1文ずつと、持ち出し用の章ごと・全体の1本もの |
+| `translate.py` `tools/mac_translate.swift` | 文ごとの日本語訳。macOS 内蔵の翻訳（Translation フレームワーク、端末内で動き文は外に出ない）。初回に swiftc で `.bin/` に作る。英語・日本語の翻訳データはシステム設定 → 一般 → 言語と地域 →「翻訳言語…」で入れる |
 | `lookup.py` | 単語を引く。EJDict → 活用を戻す → 派生語を戻す（近い語）→ Free Dictionary API（英英、ネット） |
 | `vocab.py` | 単語帳（`vocab.sqlite`）。辞書で引いて「登録」した語を入れる。答えの記録（reviews）が復習の正本 |
 | `srs.py` | 復習の計算（py-fsrs、FSRS-6 の既定値、fuzz なし）。新しい語は1日20語まで |
@@ -43,7 +44,7 @@ cp config.example.json config.json
 | `js/lookup.js` | 単語を引く（Mac 版と同じ順）。辞書は `dict/<頭文字>.json` |
 | `js/db.js` | IndexedDB への保存 |
 | `js/zip.js` | Mac から来る zip（無圧縮）を読む |
-| `sw.js` `manifest.webmanifest` `icons/` | オフライン動作とホーム画面への追加 |
+| `sw.js` `manifest.webmanifest` `icons/` | オフライン動作とホーム画面への追加。画面とプログラムはつながれば必ず新しいものを取る（古いプログラムと新しい画面が混ざらないように） |
 
 `pwa/dict/` は GitHub Actions（`.github/workflows/pages.yml`）が EJDict から作って Pages に載せます（リポジトリには入れない）。
 
