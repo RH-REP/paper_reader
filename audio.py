@@ -24,8 +24,8 @@ DATA_FORMAT = f"LEI16@{RATE_HZ}"
 GAP_AFTER_HEADING = 0.7
 GAP_AFTER_SENTENCE = 0.35
 GAP_BETWEEN_SECTIONS = 1.0
-DEFAULT_VOICE = "Samantha"
-BITRATE = 48000
+DEFAULT_VOICE = "Daniel"          # イギリス英語。最初のデモ（ブラウザ読み上げ）と同じ声で、流暢に聞こえる
+BITRATE = 64000                   # 22.05kHz モノラルの AAC で上げられる上限
 
 
 NOVELTY = {"Albert", "Bad News", "Bahh", "Bells", "Boing", "Bubbles", "Cellos", "Good News", "Jester", "Organ",
@@ -45,7 +45,7 @@ def voices() -> list[dict]:
 
 def resolve_voice(want: str | None) -> str | None:
     names = [v["name"] for v in voices()]
-    for v in (want, DEFAULT_VOICE, "Daniel"):
+    for v in (want, DEFAULT_VOICE, "Samantha"):
         if v and v in names:
             return v
     return names[0] if names else None
@@ -204,15 +204,17 @@ def generate(paper_dir: Path, paper: dict, voice: str | None = None, rate: int =
 
 
 def word_audio(words_dir: Path, word: str, voice: str | None, rate: int) -> Path | None:
-    """単語の発音（data/words/<word>.m4a）。無ければ作る。"""
+    """単語の発音（data/words/<声>/<word>.m4a）。無ければ作る。声を変えたら別に作る。"""
     w = word.lower()
     if not re.fullmatch(r"[a-z][a-z\-']{0,40}", w):
         return None
+    v = resolve_voice(voice)
+    words_dir = words_dir / re.sub(r"[^A-Za-z0-9]+", "_", v or "default")
     words_dir.mkdir(parents=True, exist_ok=True)
     m4a = words_dir / f"{w}.m4a"
     if not m4a.exists():
         wav = words_dir / f"{w}.wav"
-        _say(word, wav, resolve_voice(voice), rate)
+        _say(word, wav, v, rate)
         _to_m4a(wav, m4a)
         wav.unlink(missing_ok=True)
     return m4a
