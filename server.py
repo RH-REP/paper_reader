@@ -97,6 +97,12 @@ class App:
             self.store.paper_dir(i)                       # 無い id は KeyError
         return bundle.make_bundle(self.store, self.vocab, ids, self.store.root / "share")
 
+    def fix_refs(self, q: dict) -> dict:
+        """復習カードの例文の音声を、今の文の並びから引き直す（取り出し方を変えると文の番号がずれるため）。"""
+        for e in ((q.get("card") or {}).get("examples") or []):
+            e["audio_ref"] = self.audio_ref(e.get("paper_id"), e.get("sentence"))
+        return q
+
     def audio_ref(self, pid, sentence) -> str | None:
         """引いた文の音声（<論文id>/<音声id>）。見つからなければ None。"""
         if not (pid and sentence):
@@ -284,7 +290,7 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/vocab":
             return self._json(app.vocab.list())
         if path == "/api/review":
-            return self._json(app.vocab.queue())
+            return self._json(app.fix_refs(app.vocab.queue()))
         if path == "/api/share":
             return self._json(app.share.status())
         if path == "/api/import":
@@ -380,13 +386,13 @@ class Handler(SimpleHTTPRequestHandler):
                 app.vocab.answer(b["headword"], b["rating"])
             except KeyError:
                 return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
-            return self._json(app.vocab.queue())
+            return self._json(app.fix_refs(app.vocab.queue()))
         if path == "/api/review/undo":
             undone = app.vocab.undo()
             q = app.vocab.queue()
             if undone:
                 q["card"] = app.vocab.card_view(undone)       # 取り消した語をもう一度出す
-            return self._json({**q, "undone": undone})
+            return self._json({**app.fix_refs(q), "undone": undone})
         if path == "/api/progress":
             n = int(self.headers.get("Content-Length") or 0)
             if not 0 < n <= 20 * 1024 * 1024:

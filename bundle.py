@@ -53,11 +53,29 @@ def make_bundle(store, vocab, paper_ids: list[str], out_dir: Path) -> Path:
                     if f.exists():
                         z.write(f, f"papers/{pid}/audio/{it['id']}.m4a", compress_type=zipfile.ZIP_STORED)
             included.append(pid)
-        z.writestr("vocab.json", json.dumps(vocab.export(), ensure_ascii=False), compress_type=zipfile.ZIP_STORED)
+        voc = vocab.export()
+        for w in voc["words"]:                             # 例文の音声は今の文の並びから引き直す（文の番号は変わりうる）
+            for e in w["examples"]:
+                e["audio_ref"] = _audio_ref(store, e.get("paper_id"), e.get("sentence"))
+        z.writestr("vocab.json", json.dumps(voc, ensure_ascii=False), compress_type=zipfile.ZIP_STORED)
         z.writestr("manifest.json", json.dumps({"kind": BUNDLE_KIND, "version": VERSION,
                                                 "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
                                                 "papers": included}, ensure_ascii=False))
     return out
+
+
+def _audio_ref(store, pid, sentence):
+    if not (pid and sentence):
+        return None
+    try:
+        paper = store.load(pid)
+    except KeyError:
+        return None
+    for sec in paper["sections"]:
+        for k, s in enumerate(sec["sentences"], 1):
+            if s["t"] == sentence and s["s"]:
+                return f"{pid}/{sec['id']}_{k}"
+    return None
 
 
 def read_progress(data: bytes) -> dict:

@@ -22,13 +22,18 @@ from pathlib import Path
 import pymupdf
 import pysbd
 
-EXTRACTOR_VERSION = 1
+EXTRACTOR_VERSION = 2          # 2: 同じ行の切れ端をつなぐ／本文より小さい太字の見出し（Applied Optics など）
 MIN_TEXT_CHARS = 20          # これ未満のページは文字層が無いとみなして OCR
 BACK_MATTER = re.compile(
     r"^(references|bibliography|literature cited|acknowledge?ments?|funding|author contributions|"
     r"data availability( statement)?|conflicts? of interest|competing interests?|declaration of competing interest|"
     r"publisher'?s note|supplementary material|ethics statement|appendix)\b", re.I)
 NUMBERED = re.compile(r"^(\d+(?:\.\d+)*)\.?\s+(\S.*)$")
+# 番号の無い見出しでも見出しとみなす名前（本文より小さい太字のときに使う）
+SECTION_NAMES = re.compile(
+    r"^(abstract|introduction|background|related work|theory|methods?|materials and methods|experiments?|"
+    r"experimental( setup)?|simulations?|results?( and discussion)?|discussion( and conclusions?)?|"
+    r"conclusions?|summary|outlook|references|bibliography|acknowledge?ments?|appendix( [a-z])?)$", re.I)
 CITE_PAREN = re.compile(r"\s*\((?=[^()]*\b(?:19|20)\d{2}[a-z]?\b)[^()]*\)")   # (Smith et al., 2020; Lee 2019a)
 CITE_BRACKET = re.compile(r"\s*\[\d+(?:\s*[-–,]\s*\d+)*\]")                   # [12] [3–5] [1, 4]
 TESSDATA_CANDIDATES = ["/opt/homebrew/share/tessdata", "/usr/local/share/tessdata", "/usr/share/tesseract-ocr/5/tessdata"]
@@ -41,6 +46,7 @@ class Line:
     x0: float
     y0: float
     y1: float
+    x1: float
     text: str
     size: float
     bold: bool
@@ -74,26 +80,106 @@ def read_lines(doc, on_page=None) -> tuple[list[Line], list[int]]:
                 if on_page:
                     on_page(pno + 1, len(doc), False)
                 continue
-        d = page.get_text("dict", textpage=textpage) if textpage else page.get_text("dict")
+        # rawdict: 1文字ずつの位置が取れる。空白の文字が無く間隔だけ空いている PDF でも、間隔から空白を入れる
+        d = page.get_text("rawdict", textpage=textpage) if textpage else page.get_text("rawdict")
         mid = page.rect.width * 0.45
         page_lines = []
         for block in d["blocks"]:
             for l in block.get("lines", []):
+                for s in l["spans"]:
+                    s["text"] = ""
+                text = _line_text(l["spans"])
                 spans = [s for s in l["spans"] if s["text"].strip()]
                 if not spans:
                     continue
-                text = unicodedata.normalize("NFKC", "".join(s["text"] for s in l["spans"])).strip()
+                text = unicodedata.normalize("NFKC", text).strip()
                 sizes = Counter()
                 for s in spans:
                     sizes[round(s["size"], 1)] += len(s["text"].strip())
-                x0, y0, _, y1 = l["bbox"]
-                page_lines.append(Line(pno, int(x0 >= mid), x0, y0, y1, text,
+                x0, y0, x1, y1 = l["bbox"]
+                page_lines.append(Line(pno, int(x0 >= mid), x0, y0, y1, x1, text,
                                        sizes.most_common(1)[0][0], all(_is_bold(s) for s in spans), ocr))
         page_lines.sort(key=lambda ln: (ln.col, round(ln.y0), ln.x0))
-        lines += page_lines
+        lines += _merge_rows(page_lines)
         if on_page:
             on_page(pno + 1, len(doc), ocr)            # 取り込みのプログレスバー用
     return lines, ocr_pages
+
+
+# 最初の見出しより前（題名の下）にある、読まない行: 著作権・分類コード・受付日・キーワードなど
+FRONT_NOISE = re.compile(r"(©.*$|\bOCIS codes?:.*$|\b(received|revised|accepted|posted|published)\b.*\d{4}.*$|"
+                         r"\bdoi:?\s*10\.\S+|\bkeywords?:.*$|^[\d.,;\s]+$)", re.I)
+# 文末に来たら、pysbd が切っても次の文とつなぐ略語（Eq. (5) / Fig. 3 / Ref. 12 など）
+ABBREV_END = re.compile(r"\b(Eqs?|Figs?|Refs?|Secs?|Sects?|Tabs?|Nos?|Vol|pp|cf|ca|approx|resp|Ch|Chap)\.$")
+# 「… in Fig.」「… in Table」のあとに「2. The …」が来たら、番号だけ前の文に付けて残りは次の文にする
+REF_WORD_END = re.compile(r"\b(Eqs?\.|Figs?\.|Refs?\.|Secs?\.|Sects?\.|Tabs?\.|Table|Figure|Section|Equation|Chapter|Appendix)$")
+NUM_THEN_SENTENCE = re.compile(r"^(\(?\d{1,3}[a-z]?\)?\.)\s+(?=[A-Z])(.+)$", re.S)
+JOIN_WORD_END = re.compile(r"\b(and|or|of|to|in|the|a|an|with|for|by|from|between|vs\.?)$", re.I)
+SPACE_GAP = 0.1                   # 文字の間がこの割合（× 文字の大きさ）より空いていたら空白を入れる（ふつうの字間は 0〜0.08、空白の抜けは 0.14 前後）
+
+
+def _line_text(spans) -> str:
+    """rawdict の1行を文字列にする。空白の文字が無くても、文字の間が広ければ空白を入れる。各 span に text も入れる。"""
+    out, prev = [], None
+    for s in spans:
+        buf = []
+        for ch in s.get("chars", []):
+            c = ch["c"]
+            if prev is not None and c != " " and prev["c"] != " ":
+                gap = ch["bbox"][0] - prev["bbox"][2]
+                if gap > SPACE_GAP * s["size"]:
+                    buf.append(" ")
+            buf.append(c)
+            prev = ch
+        s["text"] = "".join(buf)
+        out.append(s["text"])
+    return "".join(out)
+
+
+def _continues(prev: str, nxt: str) -> bool:
+    """pysbd が切った2つが、本当は1つの文か。"""
+    if ABBREV_END.search(prev) or JOIN_WORD_END.search(prev):
+        return True                                    # 「… in Fig.」「… Figs. 5 and」
+    if nxt[:1].islower():
+        return True                                    # 小文字で始まる = 文の途中
+    return bool(re.match(r"^[(\[]?([a-h]|[ivx]{1,4}|\d{1,3})[)\]]", nxt))   # 「(b) and (c)」「(iv) to (v)」
+
+
+def _abstract(front: list[Line]) -> list[str]:
+    """最初の見出しより前の行から要旨を取り出す: 続いている段落のうち、いちばん長いもの（著者名・所属・受付日などは外れる）。"""
+    runs: list[list[Line]] = []
+    for ln in front:
+        text = FRONT_NOISE.sub("", ln.text).strip()
+        if not text:
+            continue
+        ln = Line(ln.page, ln.col, ln.x0, ln.y0, ln.y1, ln.x1, text, ln.size, ln.bold, ln.ocr)
+        p = runs[-1][-1] if runs else None
+        # 行の枠は少し重なることがある（行間が詰まっている PDF）ので、少しの重なりも続きとみなす
+        if p and p.page == ln.page and abs(p.size - ln.size) < 0.3 and -0.5 * ln.size <= ln.y0 - p.y1 < ln.size * 1.2:
+            runs[-1].append(ln)
+        else:
+            runs.append([ln])
+    runs = [r for r in runs if len(r) >= 2 or sum(len(x.text) for x in r) >= 120]
+    if not runs:
+        return []
+    best = max(runs, key=lambda r: sum(len(x.text) for x in r))
+    return [x.text for x in best]
+
+
+def _merge_rows(page_lines: list[Line]) -> list[Line]:
+    """同じ段・同じ高さに分かれて入っている切れ端（「1.」と「Introduction」など）を1行につなぐ。"""
+    out: list[Line] = []
+    for ln in page_lines:
+        p = out[-1] if out else None
+        # 同じ高さ・間が1文字ぶん以内・文字の大きさが近いときだけ（欄外の小さい文字をつながない）
+        if p and p.col == ln.col and abs(p.y0 - ln.y0) < 1.5 and ln.x0 >= p.x0 \
+                and ln.x0 - p.x1 < max(p.size, ln.size) and abs(p.size - ln.size) < 1.5:
+            weight_p, weight_l = len(p.text), len(ln.text)
+            out[-1] = Line(p.page, p.col, p.x0, min(p.y0, ln.y0), max(p.y1, ln.y1), max(p.x1, ln.x1), f"{p.text} {ln.text}",
+                           p.size if weight_p >= weight_l else ln.size, p.bold and ln.bold, p.ocr)
+        else:
+            out.append(ln)
+    return out
 
 
 def _repeated_margins(lines: list[Line], doc) -> set[str]:
@@ -157,16 +243,30 @@ def build_paper(doc, on_page=None) -> dict:
         if ln.ocr:
             m = NUMBERED.match(ln.text)
             return bool(m) and len(ln.text) < 70 and not ln.text.endswith(".") and m.group(2)[:1].isupper()
-        return ln.bold and ln.size >= body + 0.9
+        if not ln.bold:
+            return False
+        if ln.size >= body + 0.9:
+            return True
+        # 本文と同じか少し小さい太字（Applied Optics など）: 番号付きか、よくある章の名前のときだけ
+        if ln.size >= body - 1.5 and len(ln.text) < 80 and not ln.text.endswith("."):
+            m = NUMBERED.match(ln.text)
+            name = m.group(2) if m else ln.text
+            return bool(m and name[:1].isupper()) or bool(SECTION_NAMES.match(name.strip()))
+        return False
 
     sections: list[dict] = []
     cur = {"title": "Abstract", "number": "", "level": 1, "kind": "front", "page": 1, "_parts": []}
     prev_heading: Line | None = None
     in_back = False
+    front: list[Line] = []                         # 最初の見出しより前の行（要旨を探す）
     for ln in lines:
-        if not ln.ocr and ln.size < body - 0.4:
+        heading = is_heading(ln)                       # 小さい太字の見出しを先に拾う
+        if not heading and cur["kind"] == "front" and not ln.ocr and ln.size >= body - 2.1:
+            front.append(ln)                           # 要旨は本文より小さい雑誌がある（Applied Optics は 8pt）
+            continue
+        if not heading and not ln.ocr and ln.size < body - 0.4:
             continue                                   # 図表の説明・欄外・小さい注記
-        if is_heading(ln):
+        if heading:
             cont = (prev_heading is not None and not NUMBERED.match(ln.text) and ln.page == prev_heading.page
                     and ln.col == prev_heading.col and abs(ln.size - prev_heading.size) < 0.2
                     and 0 <= ln.y0 - prev_heading.y1 < ln.size * 0.9)
@@ -185,20 +285,33 @@ def build_paper(doc, on_page=None) -> dict:
         prev_heading = None
         cur["_parts"].append(ln.text)
     sections.append(cur)
+    if front and sections and sections[0]["kind"] == "front":
+        sections[0]["_parts"] = _abstract(front) + sections[0]["_parts"]
 
-    seg = pysbd.Segmenter(language="en", clean=False)
+    # 文の位置（char_span）で切り出す。pysbd が返す文字列は空白がずれることがあるので、元の文から切り取る
+    seg = pysbd.Segmenter(language="en", clean=False, char_span=True)
     out = []
     for i, sec in enumerate(s for s in sections if s["_parts"] or s["kind"] != "front"):
         text = _join(sec.pop("_parts"))
-        sents: list[str] = []
-        for t in (seg.segment(text) if text else []):
-            t = t.strip()
+        spans: list[list[int]] = []                    # [始まり, 終わり]
+        for sp in (seg.segment(text) if text else []):
+            a, b = sp.start, sp.end
+            t = text[a:b].strip()
             if not t:
                 continue
-            if sents and len(re.findall(r"[A-Za-z0-9]", t)) < 3:
-                sents[-1] += t                         # 「).」のような切れ端は前の文につなぐ
+            prev = text[spans[-1][0]:spans[-1][1]].strip() if spans else ""
+            m = NUM_THEN_SENTENCE.match(t)
+            if spans and len(re.findall(r"[A-Za-z0-9]", t)) < 3:
+                spans[-1][1] = b                       # 「).」のような切れ端は前の文につなぐ
+            elif spans and REF_WORD_END.search(prev) and m:
+                lead = a + (len(text[a:b]) - len(text[a:b].lstrip()))
+                spans[-1][1] = lead + len(m.group(1))  # 「… presented in Fig.」+「2.」で1文
+                spans.append([lead + m.start(2), b])   # 「The material …」は次の文
+            elif spans and _continues(prev, t):
+                spans[-1][1] = b                       # 略語や「(b) and (c)」で切られた文をつなぐ
             else:
-                sents.append(t)
+                spans.append([a, b])
+        sents = [text[a:b].strip() for a, b in spans if text[a:b].strip()]
         sec["id"] = f"s{i}"
         sec["speech_title"] = _heading_speech(sec["title"])
         sec["sentences"] = [{"t": t, "s": speech_text(t)} for t in sents]

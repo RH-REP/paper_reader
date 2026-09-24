@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -26,7 +28,7 @@ def _sha256(path: Path) -> str:
 
 
 def _write_json(path: Path, obj) -> None:
-    tmp = path.with_suffix(".tmp")
+    tmp = path.with_name(f"{path.stem}.{os.getpid()}.{threading.get_ident()}.tmp")   # 同時に書いてもぶつからない
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
     tmp.replace(path)
 
@@ -36,6 +38,7 @@ class Store:
         self.root = Path(data_root)
         self.papers = self.root / "papers"
         self.papers.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()                   # 同じ論文を同時に作り直さない
 
     def paper_dir(self, pid: str) -> Path:
         if not (len(pid) == 8 and all(c in "0123456789abcdef" for c in pid)):
@@ -61,8 +64,9 @@ class Store:
 
     def reextract(self, pid: str) -> dict:
         d = self.paper_dir(pid)
-        meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
-        return self._extract(d, meta)
+        with self._lock:
+            meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+            return self._extract(d, meta)
 
     def _extract(self, d: Path, meta: dict, on_page=None) -> dict:
         paper = extract.extract_file(d / "original.pdf", on_page)
@@ -90,7 +94,8 @@ class Store:
 
     def load(self, pid: str) -> dict:
         d = self.paper_dir(pid)
-        meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
-        if meta.get("extractor_version") != extract.EXTRACTOR_VERSION or not (d / "sentences.json").exists():
-            self._extract(d, meta)                      # 取り出し方を変えたら作り直す
+        with self._lock:
+            meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+            if meta.get("extractor_version") != extract.EXTRACTOR_VERSION or not (d / "sentences.json").exists():
+                self._extract(d, meta)                  # 取り出し方を変えたら作り直す
         return json.loads((d / "sentences.json").read_text(encoding="utf-8"))
