@@ -17,6 +17,7 @@
   GET  /api/papers/<id>/audio/<item>.m4a    1文ずつの音声
   GET  /api/papers/<id>/export/<file>.m4a   章ごとの音声
   POST /api/import                      本文 = PDF のバイト列、ヘッダー X-Filename = 元のファイル名（URL エンコード）
+  GET  /api/import                      取り込み中の進み具合（何ページ目か。プログレスバー用）
   GET  /api/lookup?w=<語>                単語を引く（単語帳には入れない。registered = 登録済みか）
   POST /api/vocab/add                   {"w", "paper", "sec", "sentence"} で引き直して単語帳に登録する
   GET  /api/word_audio?w=<語>           単語の発音
@@ -41,6 +42,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from datetime import datetime
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -84,6 +86,7 @@ class App:
         self.lock = threading.Lock()
         self.jobs: dict[str, threading.Thread] = {}
         self.share = ShareServer(self.merge_progress)
+        self.importing = {"active": False}              # 取り込み中の進み具合
 
     def merge_progress(self, data: bytes) -> dict:
         return self.vocab.merge(bundle.read_progress(data))
@@ -284,6 +287,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(app.vocab.queue())
         if path == "/api/share":
             return self._json(app.share.status())
+        if path == "/api/import":
+            return self._json(app.importing)
         if path == "/api/qr":
             from share import qr_svg
             t = q.get("t", "")[:500]
@@ -412,12 +417,20 @@ class Handler(SimpleHTTPRequestHandler):
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
                 f.write(data)
                 tmp = Path(f.name)
+            prog = {"active": True, "name": name, "page": 0, "pages": 0, "ocr": 0,
+                    "started_at": datetime.now().isoformat(timespec="seconds")}
+            app.importing = prog
+
+            def on_page(n, total, ocr):
+                prog.update(page=n, pages=total, ocr=prog["ocr"] + (1 if ocr else 0))
+
             try:
-                meta = app.store.import_pdf(tmp, name)
+                meta = app.store.import_pdf(tmp, name, on_page)
             except Exception as e:  # 壊れた PDF など
                 return self._json({"error": f"取り込めなかった: {e}"}, HTTPStatus.UNPROCESSABLE_ENTITY)
             finally:
                 tmp.unlink(missing_ok=True)
+                app.importing = {"active": False}
             app.start_audio(meta["id"])                  # 取り込んだらすぐ音声と訳をまとめて作る
             app.start_translate(meta["id"])
             return self._json(meta)

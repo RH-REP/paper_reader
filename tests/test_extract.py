@@ -34,6 +34,11 @@ class ExtractTest(unittest.TestCase):
     def sec(self, title):
         return next(s for s in self.paper["sections"] if s["title"] == title)
 
+    def test_progress_callback_per_page(self):
+        seen = []
+        extract.extract_file(self.pdf, lambda n, total, ocr: seen.append((n, total, ocr)))
+        self.assertEqual(seen, [(1, 3, False), (2, 3, False), (3, 3, False)])
+
     def test_title(self):
         self.assertEqual(self.paper["title"], make_sample_pdf.TITLE)
 

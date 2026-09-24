@@ -45,7 +45,7 @@ class Store:
             raise KeyError(pid)
         return d
 
-    def import_pdf(self, src: Path, source_name: str | None = None) -> dict:
+    def import_pdf(self, src: Path, source_name: str | None = None, on_page=None) -> dict:
         """PDF をコピーして取り込む。同じ中身が既にあれば、それをそのまま返す。"""
         src = Path(src)
         sha = _sha256(src)
@@ -57,15 +57,15 @@ class Store:
         shutil.copy2(src, d / "original.pdf")
         meta = {"id": pid, "sha256": sha, "source_name": source_name or src.name,
                 "imported_at": datetime.now().isoformat(timespec="seconds")}
-        return self._extract(d, meta)
+        return self._extract(d, meta, on_page)
 
     def reextract(self, pid: str) -> dict:
         d = self.paper_dir(pid)
         meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
         return self._extract(d, meta)
 
-    def _extract(self, d: Path, meta: dict) -> dict:
-        paper = extract.extract_file(d / "original.pdf")
+    def _extract(self, d: Path, meta: dict, on_page=None) -> dict:
+        paper = extract.extract_file(d / "original.pdf", on_page)
         paper["id"] = meta["id"]
         _write_json(d / "sentences.json", paper)
         meta.update({

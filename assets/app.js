@@ -60,18 +60,48 @@ async function importFiles(files) {
   const pdfs = [...files].filter((f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name));
   if (!pdfs.length) { $("importMsg").textContent = "PDF が選ばれていません"; return; }
   let last = null;
-  for (const f of pdfs) {
-    $("importMsg").textContent = `取り込み中: ${f.name}（OCR が要るページがあると時間がかかります）`;
+  for (const [n, f] of pdfs.entries()) {
+    const head = pdfs.length > 1 ? `(${n + 1}/${pdfs.length}) ` : "";
     try {
-      const m = await api("/api/import", { method: "POST", body: f,
-        headers: { "Content-Type": "application/pdf", "X-Filename": encodeURIComponent(f.name) } });
+      const m = await uploadWithProgress(f, head);
       last = m.id;
-      $("importMsg").textContent = `${m.already ? "既にあります" : "取り込みました（音声を作っています）"}: ${m.title}`;
+      $("importMsg").textContent = `${head}${m.already ? "既にあります" : "取り込みました（続けて音声と訳を作ります）"}: ${m.title}`;
     } catch (e) {
-      $("importMsg").textContent = `${f.name}: ${e.message}`;
+      $("importMsg").textContent = `${head}${f.name}: ${e.message}`;
     }
   }
   await loadPapers(last);
+}
+
+// 取り込みのプログレスバー: ① PDF を送る（送った割合）→ ② 文字を取り出す（何ページ目か。サーバーに聞く）
+function uploadWithProgress(file, head) {
+  const show = (st, title, opts) => { $("importMsg").textContent = ""; $("importMsg").appendChild(jobBar(st, head + title, opts)); };
+  const started = new Date().toISOString();
+  show({ done: 0, total: 100, started_at: started }, `送っています ${file.name}`, { pct: true });
+  let poll = null;
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open("POST", "/api/import");
+    x.setRequestHeader("Content-Type", "application/pdf");
+    x.setRequestHeader("X-Filename", encodeURIComponent(file.name));
+    x.upload.onprogress = (e) => { if (e.lengthComputable) show({ done: Math.round((e.loaded / e.total) * 100), total: 100 }, `送っています ${file.name}`, { pct: true }); };
+    x.upload.onload = () => {
+      show({ done: 0, total: 0 }, "文字を取り出しています…");
+      poll = setInterval(async () => {
+        const p = await api("/api/import").catch(() => null);
+        if (p?.active && p.pages) show({ done: p.page, total: p.pages, started_at: p.started_at },
+          `文字を取り出しています（ページ${p.ocr ? `、うち OCR ${p.ocr}` : ""}）`);
+      }, 400);
+    };
+    x.onload = () => {
+      clearInterval(poll);
+      let j = {};
+      try { j = JSON.parse(x.responseText); } catch {}
+      x.status >= 200 && x.status < 300 ? resolve(j) : reject(new Error(j.error || x.statusText));
+    };
+    x.onerror = () => { clearInterval(poll); reject(new Error("サーバーにつながりません")); };
+    x.send(file);
+  });
 }
 
 // ---- 論文を開く ----
@@ -96,12 +126,15 @@ async function openPaper(id) {
 }
 
 // 作っているあいだのプログレスバー: 「音声を作っています ▰▰▱ 37 / 162（23%・残り約1分）」
-function jobBar(st, title) {
+// opts.pct: 「37 / 162」を出さず割合だけ（送った割合など）。total が 0 なら、まだ量がわからない（棒は左右に動く表示）
+function jobBar(st, title, opts = {}) {
   const box = document.createElement("span");
   box.className = "job";
   const bar = document.createElement("progress");
-  bar.max = st.total || 1;
-  bar.value = st.phase === "chapters" ? bar.max : st.done || 0;
+  if (st.total) {
+    bar.max = st.total;
+    bar.value = st.phase === "chapters" ? bar.max : st.done || 0;
+  }
   const pct = st.total ? Math.floor(((st.done || 0) / st.total) * 100) : 0;
   let eta = "";
   if (st.started_at && st.done > 2 && st.done < st.total) {
@@ -109,7 +142,8 @@ function jobBar(st, title) {
     eta = sec < 60 ? "・残り1分以内" : `・残り約${Math.round(sec / 60)}分`;
   }
   const txt = document.createElement("span");
-  txt.textContent = st.phase === "chapters" ? title : `${title} ${st.done || 0} / ${st.total || "?"}（${pct}%${eta}）`;
+  txt.textContent = st.phase === "chapters" || !st.total ? title
+    : opts.pct ? `${title}（${pct}%）` : `${title} ${st.done || 0} / ${st.total}（${pct}%${eta}）`;
   box.append(txt, bar);
   return box;
 }
@@ -138,7 +172,8 @@ function renderTranslation() {
 
 function watchTranslation() {
   clearInterval(S.trPoll);
-  if (S.paper?.translation?.state !== "running") return;
+  if (S.paper?.translation?.state !== "running" && S.paper?.translation?.state !== "none") return;
+  let waited = 0;
   const id = S.paper.id;
   S.trPoll = setInterval(async () => {
     if (!S.paper || S.paper.id !== id) return clearInterval(S.trPoll);
@@ -148,6 +183,7 @@ function watchTranslation() {
     delete t.ja;
     S.paper.translation = t;
     renderTranslation();
+    if (t.state === "none" && ++waited < 30) return;
     if (t.state !== "running") { clearInterval(S.trPoll); renderSections(); }
   }, 2000);
 }
@@ -257,12 +293,15 @@ function renderAudio() {
 
 function watchAudio() {
   clearInterval(S.poll);
-  if (S.audio?.state !== "running") return;
+  // 取り込んだ直後は、開いた時点でまだ音声づくりが始まっていない（none）ことがあるので、始まるまで見張る（最大30秒）
+  if (S.audio?.state !== "running" && S.audio?.state !== "none") return;
   const id = S.paper.id;
+  let waited = 0;
   S.poll = setInterval(async () => {
     if (!S.paper || S.paper.id !== id) return clearInterval(S.poll);
     S.audio = await api(`/api/papers/${id}/audio`).catch(() => S.audio);
     renderAudio();
+    if (S.audio.state === "none" && ++waited < 30) return;
     if (S.audio.state !== "running") { clearInterval(S.poll); renderSections(); }
   }, 1000);
 }

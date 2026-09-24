@@ -59,7 +59,7 @@ def _tessdata() -> str | None:
     return next((p for p in TESSDATA_CANDIDATES if Path(p, "eng.traineddata").exists()), None)
 
 
-def read_lines(doc) -> tuple[list[Line], list[int]]:
+def read_lines(doc, on_page=None) -> tuple[list[Line], list[int]]:
     """全ページの行を読む順に返す。2つ目は OCR したページ番号（1始まり）。"""
     lines, ocr_pages = [], []
     for pno, page in enumerate(doc):
@@ -71,6 +71,8 @@ def read_lines(doc) -> tuple[list[Line], list[int]]:
                 ocr_pages.append(pno + 1)
             except Exception as e:  # Tesseract が無いなど。そのページは空のまま進む
                 print(f"OCR できなかった（{pno + 1} ページ）: {e}")
+                if on_page:
+                    on_page(pno + 1, len(doc), False)
                 continue
         d = page.get_text("dict", textpage=textpage) if textpage else page.get_text("dict")
         mid = page.rect.width * 0.45
@@ -89,6 +91,8 @@ def read_lines(doc) -> tuple[list[Line], list[int]]:
                                        sizes.most_common(1)[0][0], all(_is_bold(s) for s in spans), ocr))
         page_lines.sort(key=lambda ln: (ln.col, round(ln.y0), ln.x0))
         lines += page_lines
+        if on_page:
+            on_page(pno + 1, len(doc), ocr)            # 取り込みのプログレスバー用
     return lines, ocr_pages
 
 
@@ -125,8 +129,8 @@ def _join(parts: list[str]) -> str:
     return out
 
 
-def build_paper(doc) -> dict:
-    lines, ocr_pages = read_lines(doc)
+def build_paper(doc, on_page=None) -> dict:
+    lines, ocr_pages = read_lines(doc, on_page)
     if not lines:
         return {"title": "", "pages": len(doc), "ocr_pages": ocr_pages, "sections": []}
     margins = _repeated_margins(lines, doc)
@@ -203,6 +207,7 @@ def build_paper(doc) -> dict:
             "extractor_version": EXTRACTOR_VERSION, "sections": out}
 
 
-def extract_file(pdf_path: str | Path) -> dict:
+def extract_file(pdf_path: str | Path, on_page=None) -> dict:
+    """on_page(何ページ目, 全ページ数, OCR したか) を1ページごとに呼ぶ（進み具合の表示用）。"""
     with pymupdf.open(pdf_path) as doc:
-        return build_paper(doc)
+        return build_paper(doc, on_page)
