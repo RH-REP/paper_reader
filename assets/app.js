@@ -95,6 +95,25 @@ async function openPaper(id) {
   watchTranslation();
 }
 
+// 作っているあいだのプログレスバー: 「音声を作っています ▰▰▱ 37 / 162（23%・残り約1分）」
+function jobBar(st, title) {
+  const box = document.createElement("span");
+  box.className = "job";
+  const bar = document.createElement("progress");
+  bar.max = st.total || 1;
+  bar.value = st.phase === "chapters" ? bar.max : st.done || 0;
+  const pct = st.total ? Math.floor(((st.done || 0) / st.total) * 100) : 0;
+  let eta = "";
+  if (st.started_at && st.done > 2 && st.done < st.total) {
+    const sec = (Date.now() - new Date(st.started_at).getTime()) / 1000 / st.done * (st.total - st.done);
+    eta = sec < 60 ? "・残り1分以内" : `・残り約${Math.round(sec / 60)}分`;
+  }
+  const txt = document.createElement("span");
+  txt.textContent = st.phase === "chapters" ? title : `${title} ${st.done || 0} / ${st.total || "?"}（${pct}%${eta}）`;
+  box.append(txt, bar);
+  return box;
+}
+
 // ---- 文ごとの日本語訳（macOS 内蔵の翻訳。端末内）----
 function renderTranslation() {
   const t = S.paper.translation || { state: "none" };
@@ -102,12 +121,12 @@ function renderTranslation() {
   line.textContent = "";
   const span = document.createElement("span");
   const msg = { done: `訳: ${Object.keys(S.paper.ja || {}).length} 文（Mac 内蔵の翻訳）`,
-                running: `訳を作っています ${t.done} / ${t.total}`,
+                running: "",
                 need_install: `訳: 英語・日本語の翻訳データが Mac に入っていません。${t.error || ""}`,
                 unsupported: "訳: この Mac では英語→日本語の翻訳が使えません",
                 error: `訳を作れませんでした: ${t.error || ""}`, none: "訳はまだありません" }[t.state] || "";
   span.textContent = msg;
-  line.appendChild(span);
+  line.appendChild(t.state === "running" ? jobBar(t, "訳を作っています") : span);
   if (t.state !== "running") {
     const b = document.createElement("button");
     b.className = "small";
@@ -220,8 +239,8 @@ function renderAudio() {
     b.onclick = () => post(`/api/papers/${S.paper.id}/reveal`);
     line.append(span, b);
   } else if (a.state === "running") {
-    span.textContent = `音声を作っています ${a.done} / ${a.total}（できるまではブラウザの読み上げで代わりに読みます）`;
-    line.append(span);
+    line.append(jobBar(a, a.phase === "chapters" ? "章ごとのファイルを作っています" : "音声を作っています"),
+                Object.assign(document.createElement("span"), { className: "muted", textContent: "（できるまではブラウザの読み上げで代わりに読みます）" }));
   } else if (a.state === "error") {
     span.textContent = `音声を作れませんでした: ${a.error}`;
     const b = document.createElement("button");
@@ -245,14 +264,15 @@ function watchAudio() {
     S.audio = await api(`/api/papers/${id}/audio`).catch(() => S.audio);
     renderAudio();
     if (S.audio.state !== "running") { clearInterval(S.poll); renderSections(); }
-  }, 2000);
+  }, 1000);
 }
 
 async function regenerate() {
   stop();
   await post("/api/config", { voice: $("voice").value });
   const st = await post(`/api/papers/${S.paper.id}/audio`);
-  S.audio = st;
+  // 押した直後はまだ前の「作り終えた」状態が返ることがあるので、作り始めとして見せて見張りを始める
+  S.audio = st.started ? { ...st, state: "running", done: 0, phase: null, started_at: new Date().toISOString() } : st;
   renderAudio();
   watchAudio();
 }

@@ -43,6 +43,9 @@ button:disabled{opacity:.5;cursor:default}
 .opts{gap:16px;font-size:13px;color:var(--ink2)}
 .opts select{font:inherit;max-width:240px}
 .status{font-size:13px;color:var(--ink2);margin-left:6px}
+/* 音声・訳を作っているあいだの進み具合 */
+.job{display:inline-flex;align-items:center;gap:8px}
+.job progress{width:220px;height:10px;accent-color:var(--accent)}
 .prog{display:flex;align-items:center;gap:10px;margin:6px 0 2px}
 .prog input{flex:1;accent-color:var(--accent)}
 .prog .t{font:12px ui-monospace,Menlo,monospace;color:var(--ink2);min-width:3.6em;text-align:center}

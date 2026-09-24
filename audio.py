@@ -168,10 +168,11 @@ def generate(paper_dir: Path, paper: dict, voice: str | None = None, rate: int =
         with ThreadPoolExecutor(max_workers=workers) as ex:
             for _ in ex.map(one, its):
                 st["done"] += 1
-                if st["done"] % 5 == 0 or st["done"] == st["total"]:
-                    _write_status(paper_dir, st)
-                    if on_progress:
-                        on_progress(st["done"], st["total"])
+                _write_status(paper_dir, st)             # 画面のプログレスバー用に1文ごとに書く
+                if on_progress:
+                    on_progress(st["done"], st["total"])
+        st["phase"] = "chapters"                         # 1文ずつが終わり、章ごとの1本ものをつなぐ段階
+        _write_status(paper_dir, st)
 
         st["durations"] = {it["id"]: _wav_seconds(work / f"{it['id']}.wav") for it in its}   # プログレスバー用
         by_sec: dict[str, list] = {}
