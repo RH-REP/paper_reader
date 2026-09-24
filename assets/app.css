@@ -148,3 +148,19 @@ a.btn{display:inline-block;text-decoration:none}
   main{padding:12px 16px 80px}
   .search input{width:140px}
 }
+/* テキストの貼り付け */
+.pastedlg{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);padding:16px 20px;width:min(760px,calc(100vw - 32px));box-shadow:var(--shadow)}
+.pastedlg::backdrop{background:rgba(0,0,0,.35)}
+.pastedlg h3{margin:0 0 10px;font-size:16px}
+.pastedlg label{display:block;font-size:13px;color:var(--ink2);margin:8px 0}
+.pastedlg input,.pastedlg textarea{display:block;width:100%;margin-top:4px;font:14px/1.5 -apple-system,sans-serif;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:8px}
+.err{color:#c0392b}
+/* 章の編集 */
+button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.edithelp{background:var(--panel);border:1px dashed var(--accent);border-radius:10px;padding:8px 14px;margin:6px 0 10px;font-size:13px;color:var(--ink2)}
+.edithelp kbd{margin:0}
+.sec .ed{display:flex;gap:4px;flex-wrap:wrap}
+.sec .ed button{font-size:12px;padding:1px 8px}
+.sec .ed .lv{font-family:ui-monospace,Menlo,monospace;font-weight:700;min-width:30px}
+.sec ol li .cut{font-size:11px;padding:0 6px;margin-left:6px;border-radius:99px;color:var(--back);vertical-align:1px}
+.editing .sec ol li:hover{background:var(--hover)}

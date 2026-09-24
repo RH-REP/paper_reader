@@ -11,6 +11,8 @@
   GET  /api/papers                      取り込んだ論文の一覧（meta.json）
   GET  /api/papers/<id>                 章と文（sentences.json）＋ audio（音声の作成状態）
   POST /api/papers/<id>/reextract       章と文を作り直し、音声も作り直す
+  POST /api/papers/<id>/sections        章の編集 {"op": indent|outdent|split|merge|rename, "sec", "sentence", "title", "take"}
+                                        文が変わった分だけ音声・訳を作り直す（同じ文は控えから写す）
   POST /api/papers/<id>/audio           音声を今の声・速さで作り直す
   POST /api/papers/<id>/translate       文ごとの日本語訳を作り直す（macOS 内蔵の翻訳。端末内）
   GET  /api/papers/<id>/ai_prompt       AI に手直しを頼むプロンプト（フォルダの場所 ＋ ai_fix_prompt.md）
@@ -20,6 +22,7 @@
   GET  /api/papers/<id>/audio/<item>.m4a    1文ずつの音声
   GET  /api/papers/<id>/export/<file>.m4a   章ごとの音声
   POST /api/import                      本文 = PDF のバイト列、ヘッダー X-Filename = 元のファイル名（URL エンコード）
+  POST /api/import_text                 {"title", "text"} 貼り付けた英文を取り込む
   GET  /api/import                      取り込み中の進み具合（何ページ目か。プログレスバー用）
   GET  /api/lookup?w=<語>                単語を引く（単語帳には入れない。registered = 登録済みか）
   POST /api/vocab/add                   {"w", "paper", "sec", "sentence"} で引き直して単語帳に登録する
@@ -90,6 +93,7 @@ class App:
         self.vocab = Vocab(self.cfg["data_root"])
         self.lock = threading.Lock()
         self.jobs: dict[str, threading.Thread] = {}
+        self.redo: set[str] = set()
         self.share = ShareServer(self.merge_progress)
         self.importing = {"active": False}              # 取り込み中の進み具合
 
@@ -132,41 +136,49 @@ class App:
             raw.update(voice=self.cfg["voice"], rate=self.cfg["rate"])
             self.config_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-    def start_audio(self, pid: str, force=False) -> bool:
-        """その論文の音声づくりを裏で始める。すでに走っていれば何もしない。"""
-        with self.lock:
-            t = self.jobs.get(pid)
-            if t and t.is_alive():
-                return False
-            d = self.store.paper_dir(pid)
-            paper = self.store.load(pid)
-            st = audio.status(d)
-            # 作り終えたもの・失敗したものは、文が変わる（AI の手直し・取り出し直し）か明示の作り直しまで触らない
-            if not force and st.get("state") in ("done", "error") and audio.is_current(d, paper):
-                return False
-            t = threading.Thread(target=audio.generate, args=(d, paper, self.cfg["voice"], self.cfg["rate"]),
-                                 daemon=True, name=f"audio-{pid}")
-            self.jobs[pid] = t
-            t.start()
-            return True
+    def _loop(self, key: str, pid: str, run, current):
+        """仕事を走らせ、終わったときに文が変わっていれば（作っている最中に章を編集したなど）今の文でもう一度走らせる。"""
+        while True:
+            run(self.store.paper_dir(pid), self.store.load(pid))
+            with self.lock:
+                d = self.store.paper_dir(pid)
+                if key not in self.redo and current(d, self.store.load(pid)):
+                    self.jobs.pop(key, None)
+                    return
+                self.redo.discard(key)
 
-    def start_translate(self, pid: str, force=False) -> bool:
-        """その論文の日本語訳づくりを裏で始める（音声とは別の仕事として並べて走る）。"""
-        key = f"tr-{pid}"
+    def _start(self, key: str, pid: str, force: bool, run, current, done_states) -> bool:
         with self.lock:
             t = self.jobs.get(key)
             if t and t.is_alive():
+                if force:
+                    self.redo.add(key)                   # 走っている仕事が終わったら、もう一度走らせる
                 return False
             d = self.store.paper_dir(pid)
             paper = self.store.load(pid)
-            st = translate.status(d)
-            if not force and st.get("state") in ("done", "need_install", "unsupported", "error") \
-                    and translate.is_current(d, paper):
+            # 作り終えたもの・失敗したものは、文が変わる（手直し・章の編集・取り出し直し）か明示の作り直しまで触らない
+            if not force and self._status(key, d).get("state") in done_states and current(d, paper):
                 return False
-            t = threading.Thread(target=translate.generate, args=(d, paper), daemon=True, name=key)
+            t = threading.Thread(target=self._loop, args=(key, pid, run, current), daemon=True, name=key)
             self.jobs[key] = t
             t.start()
             return True
+
+    @staticmethod
+    def _status(key: str, d: Path) -> dict:
+        return translate.status(d) if key.startswith("tr-") else audio.status(d)
+
+    def start_audio(self, pid: str, force=False) -> bool:
+        """その論文の音声づくりを裏で始める。すでに走っていれば、終わったあとに今の文と合うか確かめ直す。"""
+        return self._start(f"audio-{pid}", pid, force,
+                           lambda d, p: audio.generate(d, p, self.cfg["voice"], self.cfg["rate"]),
+                           audio.is_current, ("done", "error"))
+
+    def start_translate(self, pid: str, force=False) -> bool:
+        """その論文の日本語訳づくりを裏で始める（音声とは別の仕事として並べて走る）。"""
+        return self._start(f"tr-{pid}", pid, force, translate.generate,
+                           translate.is_current,
+                           ("done", "need_install", "unsupported", "error"))
 
     def resume_pending(self):
         """起動時: 音声・訳がまだ無い・途中で止まった論文の仕事を始める。"""
@@ -238,6 +250,21 @@ class Handler(SimpleHTTPRequestHandler):
         except KeyError:
             return None
 
+    @staticmethod
+    def _audio_view(d: Path, paper: dict) -> dict:
+        """音声の状態。文が変わって作り直しが始まる直前も「作っている」として返す（古い番号の音声を鳴らさない）。"""
+        au = audio.ensure_durations(d, paper)
+        if au.get("state") in ("done", "error") and not audio.is_current(d, paper):
+            au = {**au, "state": "running", "done": 0, "total": len(audio.items(paper)), "phase": None}
+        return au
+
+    def _paper_payload(self, pid: str, d: Path, paper: dict) -> dict:
+        self.app.start_audio(pid)                        # 無い・古い（文が変わった）ときだけ始まる
+        self.app.start_translate(pid)
+        tr, ja = translate.view(d, paper)
+        au = self._audio_view(d, paper)
+        return {**paper, "audio": au, "ja": ja, "translation": tr, "has_pdf": (d / "original.pdf").exists()}
+
     def do_HEAD(self):
         self.do_GET()
 
@@ -264,16 +291,14 @@ class Handler(SimpleHTTPRequestHandler):
                 paper = app.store.load(m.group(1))
             except ValueError as e:                      # 手直しした sentences.json が壊れている
                 return self._json({"error": str(e)}, HTTPStatus.UNPROCESSABLE_ENTITY)
-            app.start_audio(m.group(1))                  # 無い・古い（文が変わった）ときだけ始まる
-            app.start_translate(m.group(1))
-            tr = translate.status(d)
-            return self._json({**paper, "audio": audio.ensure_durations(d, paper), "ja": tr.pop("items", {}),
-                               "translation": tr})
+            return self._json(self._paper_payload(m.group(1), d, paper))
         m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/figures", path)
         if m:
             d = self._paper_dir(m.group(1))
             if not d:
                 return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            if not (d / "original.pdf").exists():       # 貼り付けたテキストには図が無い
+                return self._json({"version": 0, "items": []})
             try:
                 return self._json(figures.extract(d))   # 無い・古いときだけ作る（前に取り込んだ論文もここで作られる）
             except Exception as e:
@@ -298,12 +323,20 @@ class Handler(SimpleHTTPRequestHandler):
             d = self._paper_dir(m.group(1))
             if not d:
                 return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
-            tr = translate.status(d)
-            return self._json({**tr, "ja": tr.pop("items", {})})
+            try:
+                tr, ja = translate.view(d, app.store.load(m.group(1)))
+            except ValueError as e:
+                return self._json({"error": str(e)}, HTTPStatus.UNPROCESSABLE_ENTITY)
+            return self._json({**tr, "ja": ja})
         m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/audio", path)
         if m:
             d = self._paper_dir(m.group(1))
-            return self._json(audio.status(d)) if d else self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            if not d:
+                return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            try:
+                return self._json(self._audio_view(d, app.store.load(m.group(1))))
+            except ValueError:
+                return self._json(audio.status(d))
         m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/(audio|export)/([A-Za-z0-9_]+\.m4a)", path)
         if m:
             d = self._paper_dir(m.group(1))
@@ -397,6 +430,31 @@ class Handler(SimpleHTTPRequestHandler):
             (d / "export").mkdir(exist_ok=True)
             subprocess.run(["open", str(d / "export")], check=False)
             return self._json({"opened": str(d / "export")})
+        m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/sections", path)
+        if m:
+            pid = m.group(1)
+            d = self._paper_dir(pid)
+            if not d:
+                return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            b = self._body_json()
+            try:
+                translate.remember(d, app.store.load(pid))   # 番号がずれる前の訳を原文ごとに控える
+                paper = app.store.edit_sections(pid, str(b.get("op", "")), b.get("sec"), b.get("sentence"),
+                                                b.get("title"), bool(b.get("take")))
+            except ValueError as e:
+                return self._json({"error": str(e)}, HTTPStatus.BAD_REQUEST)
+            return self._json(self._paper_payload(pid, d, paper))
+        if path == "/api/import_text":
+            b = self._body_json()
+            if not isinstance(b.get("text"), str) or not isinstance(b.get("title", ""), str):
+                return self._json({"error": "text（文字列）が要る"}, HTTPStatus.BAD_REQUEST)
+            try:
+                meta = app.store.import_text(b.get("title", ""), b["text"])
+            except ValueError as e:
+                return self._json({"error": str(e)}, HTTPStatus.BAD_REQUEST)
+            app.start_audio(meta["id"])
+            app.start_translate(meta["id"])
+            return self._json(meta)
         m = re.fullmatch(r"/api/vocab/(\d+)/delete", path)
         if m:
             return self._json({"deleted": app.vocab.delete(int(m.group(1)))})

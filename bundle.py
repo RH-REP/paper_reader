@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 import audio
+import translate
 
 BUNDLE_KIND = "paper_reader_bundle"
 PROGRESS_KIND = "paper_reader_progress"
@@ -52,11 +53,14 @@ def make_bundle(store, vocab, paper_ids: list[str], out_dir: Path) -> Path:
                     if f.is_file() and f.suffix == ".png":
                         z.write(f, f"papers/{pid}/figures/{f.name}", compress_type=zipfile.ZIP_STORED)
             if (d / "translation.json").exists():
-                z.write(d / "translation.json", f"papers/{pid}/translation.json", compress_type=zipfile.ZIP_STORED)
+                tr, ja = translate.view(d, paper)          # 章を編集した直後でも、今の文の番号で入れる
+                z.writestr(f"papers/{pid}/translation.json", json.dumps({**tr, "items": ja}, ensure_ascii=False),
+                           compress_type=zipfile.ZIP_STORED)
             st = audio.ensure_durations(d, paper)
-            if st.get("durations"):
+            current = st.get("state") == "done" and audio.is_current(d, paper)   # 編集後の作り直し前の音声は番号がずれている
+            if current and st.get("durations"):
                 z.writestr(f"papers/{pid}/durations.json", json.dumps(st["durations"]), compress_type=zipfile.ZIP_STORED)
-            if audio.status(d).get("state") == "done":
+            if current:
                 for it in audio.items(paper):
                     f = d / "audio" / f"{it['id']}.m4a"
                     if f.exists():

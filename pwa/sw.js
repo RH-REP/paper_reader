@@ -3,7 +3,7 @@
 //   （保存したものを先に出すと、更新直後に「新しい画面＋古いプログラム」が混ざって動かなくなるため）
 // - 辞書（dict/*.json）: 大きく、めったに変わらないので保存したものを先に出す
 // 版を上げると古い保存は消える。新しい版に切り替わると、画面（js/app.js）が1回だけ読み直す。
-const CACHE = "paper_reader-v7";
+const CACHE = "paper_reader-v8";
 const SHELL = ["./", "index.html", "app.css", "manifest.webmanifest", "js/app.js", "js/db.js", "js/lookup.js",
                "js/srs.js", "js/zip.js", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png"];
 

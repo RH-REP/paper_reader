@@ -47,7 +47,8 @@ async function loadPapers(selectId) {
     li.dataset.id = m.id;
     li.textContent = m.title;
     const sm = document.createElement("small");
-    sm.textContent = `${m.pages}ページ・${m.sections}章・${m.sentences}文` + (m.ocr_pages?.length ? `・OCR ${m.ocr_pages.length}ページ` : "");
+    sm.textContent = (m.source === "text" ? "テキスト" : `${m.pages}ページ`) + `・${m.sections}章・${m.sentences}文`
+      + (m.ocr_pages?.length ? `・OCR ${m.ocr_pages.length}ページ` : "");
     li.appendChild(sm);
     li.onclick = () => openPaper(m.id);
     ul.appendChild(li);
@@ -118,8 +119,9 @@ async function openPaper(id) {
   $("paper").hidden = false;
   const meta = S.papers.find((m) => m.id === id) || {};
   $("paperTitle").textContent = p.title || meta.title || id;
-  $("paperMeta").textContent = `${meta.source_name || ""} ・ ${p.pages}ページ ・ ${p.sections.length}章`
-    + (p.ocr_pages.length ? ` ・ OCR したページ: ${p.ocr_pages.join(", ")}` : "");
+  S.openSecs = new Set();
+  renderMeta();
+  $("aiBtn").hidden = !p.has_pdf;                  // 貼り付けたテキストには元の PDF が無い
   renderSections();
   renderAudio();
   watchAudio();
@@ -127,7 +129,16 @@ async function openPaper(id) {
   watchTranslation();
   $("aiPanel").hidden = true;
   loadFigures();
-  $("manualTag").textContent = p.manual ? `AI 手直し済み（${(p.manual.at || "").slice(0, 16).replace("T", " ")}）${p.manual.notes ? `: ${p.manual.notes}` : ""}` : "";
+}
+
+function renderMeta() {
+  const p = S.paper;
+  const meta = S.papers.find((m) => m.id === p.id) || {};
+  $("paperMeta").textContent = (p.has_pdf ? `${meta.source_name || ""} ・ ${p.pages}ページ` : "貼り付けたテキスト")
+    + ` ・ ${p.sections.length}章` + (p.ocr_pages.length ? ` ・ OCR したページ: ${p.ocr_pages.join(", ")}` : "");
+  const m = p.manual;
+  $("manualTag").textContent = !m ? "" : `${m.by === "user" ? "画面で編集済み" : "AI 手直し済み"}（${(m.edited_at || m.at || "").slice(0, 16).replace("T", " ")}）`
+    + (m.notes && m.by !== "user" ? `: ${m.notes}` : "");
 }
 
 // ---- 図・表・数式（画像として開く）----
@@ -263,7 +274,8 @@ function renderSections() {
   const p = S.paper;
   const ol = $("sections");
   ol.innerHTML = "";
-  for (const sec of p.sections) {
+  ol.classList.toggle("editing", !!S.editing);
+  for (const [i, sec] of p.sections.entries()) {
     const li = document.createElement("li");
     li.className = `sec l${Math.min(sec.level, 3)}` + (sec.kind === "back" ? " back" : "");
     li.dataset.sec = sec.id;
@@ -279,8 +291,9 @@ function renderSections() {
     name.textContent = sec.title;
     const count = document.createElement("span");
     count.className = "count";
-    count.textContent = `${sec.sentences.length}文 ・ p.${sec.page}`;
+    count.textContent = `${sec.sentences.length}文` + (p.has_pdf ? ` ・ p.${sec.page}` : "");
     head.append(btn, name, count);
+    if (S.editing) head.appendChild(editControls(sec, i));
     const f = S.audio?.state === "done" && chapterFile(sec);
     if (f) {
       const a = document.createElement("a");
@@ -294,6 +307,8 @@ function renderSections() {
     li.appendChild(head);
     if (sec.sentences.length) {
       const det = document.createElement("details");
+      det.open = S.openSecs?.has(sec.id);
+      det.ontoggle = () => { det.open ? S.openSecs.add(sec.id) : S.openSecs.delete(sec.id); };
       const sum = document.createElement("summary");
       sum.textContent = "文を見る（単語をクリックで辞書）";
       const list = document.createElement("ol");
@@ -311,6 +326,14 @@ function renderSections() {
         const t = document.createElement("span");
         fillWords(t, s.t);
         x.appendChild(t);
+        if (S.editing) {
+          const c = document.createElement("button");
+          c.className = "cut";
+          c.textContent = "ここで分ける";
+          c.title = "この文から新しい章にする（短い文なら、その文を見出しにできる）";
+          c.onclick = () => splitAt(i, k);
+          x.appendChild(c);
+        }
         const ja = S.paper.ja?.[`${sec.id}_${k + 1}`];
         if (ja) {
           const j = document.createElement("div");
@@ -325,6 +348,85 @@ function renderSections() {
     }
     ol.appendChild(li);
   }
+}
+
+// ---- 章の編集（見出しの段・分ける・つなぐ・名前）----
+function editControls(sec, i) {
+  const box = document.createElement("span");
+  box.className = "ed";
+  const b = (text, title, fn, disabled) => {
+    const x = document.createElement("button");
+    x.textContent = text;
+    x.title = title;
+    x.disabled = !!disabled;
+    x.onclick = fn;
+    box.appendChild(x);
+  };
+  const secs = S.paper.sections;
+  b("<", "この章と下の節を1段上げる", () => editSections({ op: "outdent", sec: i }), sec.level <= 1);
+  b(">", "この章と下の節を1段下げる", () => editSections({ op: "indent", sec: i }),
+    i === 0 || sec.level > secs[i - 1].level || sec.level >= 3);
+  box.firstChild.classList.add("lv");
+  box.children[1].classList.add("lv");
+  b("名前", "見出しを変える", () => {
+    const t = prompt("見出し", sec.title);
+    if (t && t.trim() && t.trim() !== sec.title) editSections({ op: "rename", sec: i, title: t.trim() });
+  });
+  b("前とつなぐ", "見出しを文に戻して、前の章に入れる", () => editSections({ op: "merge", sec: i }), i === 0);
+  return box;
+}
+
+function splitAt(i, k) {
+  const t = S.paper.sections[i].sentences[k].t.trim();
+  const short = t.split(/\s+/).length <= 10;
+  const guess = short ? t.replace(/[.:]\s*$/, "") : "";
+  const title = prompt(short ? "新しい章の見出し（そのままなら、この文が見出しになります）"
+                             : "新しい章の見出し（この文から下が新しい章になります）", guess);
+  if (title === null || !title.trim()) return;
+  const take = short && title.trim() === guess;      // 見出しにした文は本文から外す
+  if (!take && k === 0) return alert("章の最初の文の前では分けられません（見出しを変えるなら「名前」）");
+  editSections({ op: "split", sec: i, sentence: k, take, title: title.trim() });
+}
+
+async function editSections(body) {
+  stop();
+  $("editMsg").textContent = "";
+  const y = scrollY;
+  let p;
+  try { p = await post(`/api/papers/${S.paper.id}/sections`, body); }
+  catch (e) { $("editMsg").textContent = ` ${e.message}`; return; }
+  const keep = S.openSecs;
+  S.paper = p;
+  S.audio = p.audio;
+  S.openSecs = keep;
+  const m = S.papers.find((x) => x.id === p.id);
+  if (m) { m.sections = p.sections.length; m.sentences = p.sections.reduce((n, s) => n + s.sentences.length, 0); }
+  renderMeta();
+  renderSections();
+  renderAudio();
+  watchAudio();
+  renderTranslation();
+  watchTranslation();
+  scrollTo(0, y);
+}
+
+function setEditing(on) {
+  S.editing = on;
+  $("editBtn").setAttribute("aria-pressed", String(on));
+  $("editHelp").hidden = !on;
+  $("editMsg").textContent = "";
+  if (S.paper) renderSections();
+}
+
+// ---- テキストを貼り付けて取り込む ----
+async function importText(title, text) {
+  $("pasteMsg").textContent = "";
+  let m;
+  try { m = await post("/api/import_text", { title, text }); }
+  catch (e) { $("pasteMsg").textContent = e.message; return false; }
+  $("importMsg").textContent = `${m.already ? "既にあります" : "取り込みました（続けて音声と訳を作ります）"}: ${m.title}`;
+  await loadPapers(m.id);
+  return true;
 }
 
 // ---- 音声の作成状態 ----
@@ -883,6 +985,18 @@ $("showJa").checked = pref.get("showJa", true);
 $("sections").classList.toggle("hide-ja", !$("showJa").checked);
 $("showJa").onchange = () => { pref.set("showJa", $("showJa").checked); $("sections").classList.toggle("hide-ja", !$("showJa").checked); };
 $("skipBack").onchange = () => pref.set("skipBack", $("skipBack").checked);
+$("editBtn").onclick = () => setEditing(!S.editing);
+$("pasteBtn").onclick = () => { $("pasteMsg").textContent = ""; $("pasteDlg").showModal(); $("pasteText").focus(); };
+$("pasteCancel").onclick = (e) => { e.preventDefault(); $("pasteDlg").close(); };
+$("pasteForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const text = $("pasteText").value.trim();
+  if (!text) { $("pasteMsg").textContent = "本文が空です"; return; }
+  $("pasteOk").disabled = true;
+  const ok = await importText($("pasteTitle").value.trim(), text);
+  $("pasteOk").disabled = false;
+  if (ok) { $("pasteDlg").close(); $("pasteTitle").value = ""; $("pasteText").value = ""; }
+};
 $("importInput").onchange = (e) => { importFiles(e.target.files); e.target.value = ""; };
 $("searchForm").onsubmit = (e) => {
   e.preventDefault();

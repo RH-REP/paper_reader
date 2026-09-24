@@ -2,6 +2,8 @@
 
   data/papers/<id>/audio/<sid>_h.m4a      章見出し（"Section 2. Design Drivers."）
   data/papers/<id>/audio/<sid>_<k>.m4a    章の k 文目（1始まり。引用を除いた読み上げ用の文）
+  data/papers/<id>/audio/cache/<鍵>.wav/.m4a  文ごとの音声の控え。鍵 = 声・速さ・読む文の目印。章を編集して文の番号が
+                                          ずれても、同じ文は作り直さずここから写す（今の文に使わない控えは作り終えたら消す）
   data/papers/<id>/audio/audio.json       作成の状態（state, voice, rate, total, done, durations = {音声id: 秒}, ...）
   data/papers/<id>/export/NN_<章>.m4a      スマホに持ち出す用。章（節を含む）を1本にしたもの。後付けは作らない
   data/papers/<id>/export/00_all.m4a      本文全体を1本にしたもの
@@ -14,6 +16,7 @@ import json
 import re
 import shutil
 import subprocess
+import threading
 import wave
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -79,6 +82,11 @@ def is_current(paper_dir: Path, paper: dict) -> bool:
         _write_status(paper_dir, st)
         return True
     return False
+
+
+def _cache_key(voice: str | None, rate: int, text: str) -> str:
+    import hashlib
+    return hashlib.sha1(f"{voice}|{rate}|{text}".encode("utf-8")).hexdigest()[:20]
 
 
 def _say(text: str, wav: Path, voice: str | None, rate: int):
@@ -166,30 +174,49 @@ def generate(paper_dir: Path, paper: dict, voice: str | None = None, rate: int =
              on_progress=None) -> dict:
     """1文ずつの m4a と、持ち出し用の章ごとの m4a を作り直す。"""
     audio_dir, export_dir = paper_dir / "audio", paper_dir / "export"
-    for d in (audio_dir, export_dir):
-        shutil.rmtree(d, ignore_errors=True)
-        d.mkdir(parents=True)
+    cache = audio_dir / "cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    for f in audio_dir.iterdir():                        # 控え（cache/）だけ残して消す
+        if f != cache:
+            shutil.rmtree(f) if f.is_dir() else f.unlink()
+    shutil.rmtree(export_dir, ignore_errors=True)
+    export_dir.mkdir(parents=True)
     work = audio_dir / "_wav"
     work.mkdir()
     voice = resolve_voice(voice)
     its = items(paper)
-    st = {"state": "running", "voice": voice, "rate": rate, "total": len(its), "done": 0,
+    st = {"state": "running", "voice": voice, "rate": rate, "total": len(its), "done": 0, "reused": 0,
           "extractor_version": paper.get("extractor_version"), "items_hash": items_hash(paper),
           "started_at": datetime.now().isoformat(timespec="seconds")}
     _write_status(paper_dir, st)
+    keys = {it["id"]: _cache_key(voice, rate, it["text"]) for it in its}
+    locks = {k: threading.Lock() for k in keys.values()}  # 同じ文（同じ見出しなど）を2つのスレッドで作らない
     try:
         def one(it):
-            wav = work / f"{it['id']}.wav"
-            _say(it["text"], wav, voice, rate)
-            _to_m4a(wav, audio_dir / f"{it['id']}.m4a")
-            return it["id"]
+            key = keys[it["id"]]
+            wav, m4a = cache / f"{key}.wav", cache / f"{key}.m4a"
+            with locks[key]:
+                reused = wav.exists() and m4a.exists()
+                if not reused:
+                    tmp = work / f"{it['id']}.wav"
+                    _say(it["text"], tmp, voice, rate)
+                    _to_m4a(tmp, m4a)
+                    tmp.replace(wav)
+            shutil.copyfile(wav, work / f"{it['id']}.wav")
+            shutil.copyfile(m4a, audio_dir / f"{it['id']}.m4a")
+            return reused
 
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            for _ in ex.map(one, its):
+            for reused in ex.map(one, its):
                 st["done"] += 1
+                st["reused"] += int(reused)
                 _write_status(paper_dir, st)             # 画面のプログレスバー用に1文ごとに書く
                 if on_progress:
                     on_progress(st["done"], st["total"])
+        used = set(keys.values())
+        for f in cache.iterdir():                        # 今の文に使わない控えは消す
+            if f.stem not in used:
+                f.unlink(missing_ok=True)
         st["phase"] = "chapters"                         # 1文ずつが終わり、章ごとの1本ものをつなぐ段階
         _write_status(paper_dir, st)
 

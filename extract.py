@@ -22,6 +22,7 @@ from pathlib import Path
 import pymupdf
 import pysbd
 
+TEXT_VERSION = 1               # 貼り付けたテキストの分け方の版（build_from_text）
 EXTRACTOR_VERSION = 2          # 2: 同じ行の切れ端をつなぐ／本文より小さい太字の見出し（Applied Optics など）
 MIN_TEXT_CHARS = 20          # これ未満のページは文字層が無いとみなして OCR
 BACK_MATTER = re.compile(
@@ -215,6 +216,35 @@ def _join(parts: list[str]) -> str:
     return out
 
 
+_SEG = None
+
+
+def split_sentences(text: str) -> list[str]:
+    """文に分ける。文の位置（char_span）で切り出す。pysbd が返す文字列は空白がずれることがあるので、元の文から切り取る。"""
+    global _SEG
+    if _SEG is None:
+        _SEG = pysbd.Segmenter(language="en", clean=False, char_span=True)
+    spans: list[list[int]] = []                        # [始まり, 終わり]
+    for sp in (_SEG.segment(text) if text else []):
+        a, b = sp.start, sp.end
+        t = text[a:b].strip()
+        if not t:
+            continue
+        prev = text[spans[-1][0]:spans[-1][1]].strip() if spans else ""
+        m = NUM_THEN_SENTENCE.match(t)
+        if spans and len(re.findall(r"[A-Za-z0-9]", t)) < 3:
+            spans[-1][1] = b                           # 「).」のような切れ端は前の文につなぐ
+        elif spans and REF_WORD_END.search(prev) and m:
+            lead = a + (len(text[a:b]) - len(text[a:b].lstrip()))
+            spans[-1][1] = lead + len(m.group(1))      # 「… presented in Fig.」+「2.」で1文
+            spans.append([lead + m.start(2), b])       # 「The material …」は次の文
+        elif spans and _continues(prev, t):
+            spans[-1][1] = b                           # 略語や「(b) and (c)」で切られた文をつなぐ
+        else:
+            spans.append([a, b])
+    return [text[a:b].strip() for a, b in spans if text[a:b].strip()]
+
+
 def build_paper(doc, on_page=None) -> dict:
     lines, ocr_pages = read_lines(doc, on_page)
     if not lines:
@@ -288,30 +318,9 @@ def build_paper(doc, on_page=None) -> dict:
     if front and sections and sections[0]["kind"] == "front":
         sections[0]["_parts"] = _abstract(front) + sections[0]["_parts"]
 
-    # 文の位置（char_span）で切り出す。pysbd が返す文字列は空白がずれることがあるので、元の文から切り取る
-    seg = pysbd.Segmenter(language="en", clean=False, char_span=True)
     out = []
     for i, sec in enumerate(s for s in sections if s["_parts"] or s["kind"] != "front"):
-        text = _join(sec.pop("_parts"))
-        spans: list[list[int]] = []                    # [始まり, 終わり]
-        for sp in (seg.segment(text) if text else []):
-            a, b = sp.start, sp.end
-            t = text[a:b].strip()
-            if not t:
-                continue
-            prev = text[spans[-1][0]:spans[-1][1]].strip() if spans else ""
-            m = NUM_THEN_SENTENCE.match(t)
-            if spans and len(re.findall(r"[A-Za-z0-9]", t)) < 3:
-                spans[-1][1] = b                       # 「).」のような切れ端は前の文につなぐ
-            elif spans and REF_WORD_END.search(prev) and m:
-                lead = a + (len(text[a:b]) - len(text[a:b].lstrip()))
-                spans[-1][1] = lead + len(m.group(1))  # 「… presented in Fig.」+「2.」で1文
-                spans.append([lead + m.start(2), b])   # 「The material …」は次の文
-            elif spans and _continues(prev, t):
-                spans[-1][1] = b                       # 略語や「(b) and (c)」で切られた文をつなぐ
-            else:
-                spans.append([a, b])
-        sents = [text[a:b].strip() for a, b in spans if text[a:b].strip()]
+        sents = split_sentences(_join(sec.pop("_parts")))
         sec["id"] = f"s{i}"
         sec["speech_title"] = _heading_speech(sec["title"])
         sec["sentences"] = [{"t": t, "s": speech_text(t)} for t in sents]
@@ -324,3 +333,63 @@ def extract_file(pdf_path: str | Path, on_page=None) -> dict:
     """on_page(何ページ目, 全ページ数, OCR したか) を1ページごとに呼ぶ（進み具合の表示用）。"""
     with pymupdf.open(pdf_path) as doc:
         return build_paper(doc, on_page)
+
+
+MD_HEADING = re.compile(r"^(#{1,3})\s+(\S.*?)\s*#*$")
+
+
+def _text_heading(line: str, alone: bool) -> tuple[str, int] | None:
+    """貼り付けたテキストの1行が見出しなら (見出し, 段) を返す。
+    「## 見出し」「1. Introduction」「2.1 Methods」、前後が空行の短い行（句読点で終わらない）を見出しとみなす。"""
+    m = MD_HEADING.match(line)
+    if m:
+        return m.group(2), len(m.group(1))
+    words = line.split()
+    if not words or len(words) > 12 or re.search(r"[.!?,;:]$", line) or not re.search(r"[A-Za-z]", line):
+        return None
+    m = NUMBERED.match(line)
+    if m and m.group(2)[:1].isupper():
+        return line, min(3, m.group(1).count(".") + 1)
+    if alone and len(words) <= 8 and (line[:1].isupper() or line[:1].isdigit()):
+        return line, 1
+    return None
+
+
+def build_from_text(title: str, text: str) -> dict:
+    """貼り付けた英文 → 章と文。見出しより前の文は、文書の題名を章名にする。"""
+    lines = [ln.strip() for ln in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    title = title.strip()
+    if not title:
+        first = next((ln for ln in lines if ln), "")
+        if first and len(first.split()) <= 12 and not re.search(r"[.!?]$", first):
+            title = MD_HEADING.sub(r"\2", first)
+            lines.remove(first)
+        else:
+            title = " ".join(first.split()[:8]) or "Untitled"
+    sections: list[dict] = []
+    cur = {"title": title, "level": 1, "paras": [[]]}
+    for i, ln in enumerate(lines):
+        if not ln:
+            cur["paras"].append([])
+            continue
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        alone = (i == 0 or not lines[i - 1]) and (not nxt or nxt[:1].isupper())   # 折り返しの途中の行は見出しにしない
+        h = _text_heading(ln, alone)
+        if h:
+            sections.append(cur)
+            cur = {"title": h[0], "level": h[1], "paras": [[]]}
+            continue
+        cur["paras"][-1].append(ln)
+    sections.append(cur)
+    out = []
+    for sec in sections:
+        sents = [t for para in sec["paras"] if para for t in split_sentences(_join(para))]
+        if not sents and sec is sections[0] and len(sections) > 1:
+            continue                                   # 最初の見出しより前に文が無ければ、題名の章は作らない
+        m = NUMBERED.match(sec["title"])
+        out.append({"id": f"s{len(out)}", "title": sec["title"], "number": m.group(1) if m else "",
+                    "level": sec["level"], "kind": "body", "page": 1,
+                    "speech_title": _heading_speech(sec["title"]),
+                    "sentences": [{"t": t, "s": speech_text(t)} for t in sents]})
+    return {"title": title, "pages": 0, "ocr_pages": [], "source": "text",
+            "extractor_version": f"text{TEXT_VERSION}", "sections": out}

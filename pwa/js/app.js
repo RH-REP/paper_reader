@@ -5,7 +5,7 @@ import { lookup } from "./lookup.js";
 import * as srs from "./srs.js";
 import { unzipStored, text } from "./zip.js";
 
-const VERSION = "7";
+const VERSION = "8";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
@@ -58,7 +58,7 @@ async function loadPapers() {
     const li = document.createElement("li");
     li.textContent = p.meta.title;
     const sm = document.createElement("small");
-    sm.textContent = `${p.meta.pages}ページ・${p.meta.sections}章・${p.meta.sentences}文`;
+    sm.textContent = (p.meta.source === "text" ? "テキスト" : `${p.meta.pages}ページ`) + `・${p.meta.sections}章・${p.meta.sentences}文`;
     li.appendChild(sm);
     li.onclick = () => openPaper(p.id);
     ul.appendChild(li);

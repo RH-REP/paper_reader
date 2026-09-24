@@ -15,6 +15,7 @@
     <button data-view="phone">スマホ</button>
   </nav>
   <label class="btn">PDF を取り込む<input type="file" id="importInput" accept="application/pdf,.pdf" multiple hidden></label>
+  <button id="pasteBtn" class="btn">テキストを貼り付け</button>
   <form id="searchForm" class="search"><input id="searchInput" type="search" placeholder="英単語を引く" autocomplete="off" spellcheck="false"></form>
   <span id="importMsg" class="muted"></span>
 </header>
@@ -23,7 +24,7 @@
   <aside class="side">
     <h2>論文</h2>
     <ul id="paperList" class="list"></ul>
-    <p id="paperEmpty" class="muted" hidden>まだありません。上の「PDF を取り込む」から入れるか、この画面に PDF をドラッグしてください。</p>
+    <p id="paperEmpty" class="muted" hidden>まだありません。上の「PDF を取り込む」か「テキストを貼り付け」から入れるか、この画面に PDF をドラッグしてください。</p>
     <h2>単語帳 <span id="vocabCount" class="muted"></span></h2>
     <ul id="vocabList" class="list vocab"></ul>
     <p id="vocabEmpty" class="muted" hidden>文の中の単語をクリックして辞書を出し、「単語帳に登録」を押すとここに入ります。</p>
@@ -116,6 +117,7 @@
       <h2 id="paperTitle"></h2>
       <p id="paperMeta" class="muted"></p>
       <p class="audioline"><button id="figBtn" class="small" hidden>図・表・数式</button>
+        <button id="editBtn" class="small" aria-pressed="false" title="見出しの段を上げ下げ・章を分ける・つなぐ・名前を変える">章を編集</button>
         <button id="aiBtn" class="small">AI に手直しを頼む（プロンプトをコピー）</button>
         <span id="manualTag" class="muted"></span></p>
       <div id="figPanel" class="figpanel" hidden>
@@ -128,6 +130,11 @@
           直ったらこの論文を開き直すと、音声と訳が作り直されます。</p>
         <textarea id="aiText" readonly rows="10"></textarea>
         <p><button id="aiCopy" class="primary">コピー</button> <button id="aiClose" class="small">閉じる</button> <span id="aiMsg" class="muted"></span></p>
+      </div>
+      <div id="editHelp" class="edithelp" hidden>
+        <b>章の編集</b>: 見出しの <kbd>&lt;</kbd> <kbd>&gt;</kbd> でその章と下の節を1段上げる／下げる（3段まで）。
+        「名前」で見出しを変える、「前とつなぐ」で見出しを文に戻して前の章に入れる。文の「ここで分ける」でその文から新しい章にする。
+        変えた文の分だけ音声と訳が作り直されます（同じ文は作り直しません）。<span id="editMsg" class="err"></span>
       </div>
       <p id="audioLine" class="audioline"></p>
       <p id="trLine" class="audioline"></p>
@@ -165,6 +172,17 @@
     </div>
   </main>
 </div>
+
+<dialog id="pasteDlg" class="pastedlg">
+  <form id="pasteForm" method="dialog">
+    <h3>テキストを貼り付けて音声にする（英語）</h3>
+    <label>題名（空なら1行目から付けます）<input id="pasteTitle" type="text" autocomplete="off" spellcheck="false"></label>
+    <label>本文<textarea id="pasteText" rows="14" spellcheck="false"
+      placeholder="英文を貼り付けてください。&#10;「## 見出し」「1. Introduction」の行や、前後が空行の短い行（句点で終わらない）は見出しになります。&#10;章分けはあとで「章を編集」で直せます。"></textarea></label>
+    <p><button id="pasteOk" class="primary" value="ok">取り込む</button> <button id="pasteCancel" value="cancel" formnovalidate>やめる</button>
+      <span id="pasteMsg" class="err"></span></p>
+  </form>
+</dialog>
 
 <aside id="wordCard" class="wordcard" hidden>
   <button id="wordClose" class="close" title="閉じる">×</button>

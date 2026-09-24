@@ -4,6 +4,7 @@
     {"state": "done" | "running" | "need_install" | "unsupported" | "error",
      "engine": "apple", "target": "ja", "total", "done", "items": {"<sec>_<k>": "訳", ...}}
 
+  data/papers/<id>/translation_cache.json   {"原文": "訳"}。章を編集して文の番号がずれても、同じ文は訳し直さない
 - 文（画面に出す原文 t）を CHUNK 文ずつ tools/mac_translate.swift に渡す。翻訳はこの Mac の中だけで行う
 - 英語・日本語の言語データが入っていなければ state = need_install（システム設定から入れて「作り直す」）
 - tools/mac_translate.swift は初回に swiftc で <このフォルダ>/.bin/mac_translate に作る（Xcode のコマンドラインツールが要る）
@@ -74,6 +75,43 @@ def _write(paper_dir: Path, st: dict):
     tmp.replace(p)
 
 
+def _read_cache(paper_dir: Path) -> dict:
+    p = paper_dir / "translation_cache.json"
+    try:
+        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except ValueError:
+        return {}
+
+
+def _write_cache(paper_dir: Path, cache: dict):
+    p = paper_dir / "translation_cache.json"
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(p)
+
+
+def remember(paper_dir: Path, paper: dict):
+    """今の訳を原文ごとの控えに入れておく（章を編集する前に呼ぶ。控えが無い前の訳も使い回せるように）。"""
+    st = status(paper_dir)
+    if st.get("state") != "done" or not is_current(paper_dir, paper):
+        return
+    cache = _read_cache(paper_dir)
+    cache.update({t: st["items"][k] for k, t in items(paper) if k in st.get("items", {})})
+    _write_cache(paper_dir, cache)
+
+
+def view(paper_dir: Path, paper: dict) -> tuple[dict, dict]:
+    """画面に出す (状態, {"<sec>_<k>": 訳})。文が変わって作り直す前でも、同じ文の訳は控えから出す。"""
+    st = status(paper_dir)
+    ja = st.pop("items", {})
+    if st.get("state") in (None, "none") or is_current(paper_dir, paper):
+        return st, ja
+    cache = _read_cache(paper_dir)
+    its = items(paper)
+    ja = {k: cache[t] for k, t in its if t in cache}
+    return {**st, "state": "running", "done": len(ja), "total": len(its)}, ja
+
+
 def _call(exe: Path, texts: list[str]) -> dict:
     r = subprocess.run([str(exe)], input=json.dumps({"source": "en", "target": "ja", "texts": texts}),
                        capture_output=True, text=True, timeout=600)
@@ -88,11 +126,15 @@ def generate(paper_dir: Path, paper: dict) -> dict:
     st = {"state": "running", "engine": "apple", "target": "ja", "total": len(its), "done": 0, "items": {},
           "extractor_version": paper.get("extractor_version"), "items_hash": items_hash(paper),
           "started_at": datetime.now().isoformat(timespec="seconds")}
-    _write(paper_dir, st)
+    cache = _read_cache(paper_dir)
+    st["items"] = {key: cache[t] for key, t in its if t in cache}
+    st["done"] = len(st["items"])
+    _write(paper_dir, st)                                # 控えにあった訳は最初からすぐ画面に出す
     try:
-        exe = translator()
-        for i in range(0, len(its), CHUNK):
-            chunk = its[i:i + CHUNK]
+        todo = [(k, t) for k, t in its if k not in st["items"]]
+        exe = translator() if todo else None
+        for i in range(0, len(todo), CHUNK):
+            chunk = todo[i:i + CHUNK]
             res = _call(exe, [t for _, t in chunk])
             if res.get("status") == "supported":
                 st.update(state="need_install", error=INSTALL_HINT, items={}, done=0)
@@ -101,8 +143,8 @@ def generate(paper_dir: Path, paper: dict) -> dict:
                 st.update(state="unsupported" if res.get("status") == "unsupported" else "error",
                           error=res.get("error") or "この Mac では英語→日本語の翻訳が使えない")
                 return st
-            for (key, _), ja in zip(chunk, res["translations"]):
-                st["items"][key] = ja
+            for (key, t), ja in zip(chunk, res["translations"]):
+                st["items"][key] = cache[t] = ja
             st["done"] = len(st["items"])
             _write(paper_dir, st)
         st.update(state="done", finished_at=datetime.now().isoformat(timespec="seconds"))
@@ -110,4 +152,6 @@ def generate(paper_dir: Path, paper: dict) -> dict:
         st.update(state="error", error=str(e)[:500])
     finally:
         _write(paper_dir, st)
+        # 訳し終えたら今の文に使わない訳は捨てる。途中で止まったら、訳せた分を控えに残す
+        _write_cache(paper_dir, {t: cache[t] for _, t in its if t in cache} if st["state"] == "done" else cache)
     return st
