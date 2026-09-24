@@ -3,7 +3,7 @@ name: pages
 on:
   push:
     branches: [master]
-    paths: ["pwa/**", "tools/build_pwa_dict.py", "tools/build_dict.py", ".github/workflows/pages.yml"]
+    paths: ["pwa/**", "assets/shared.js", "tools/build_pwa_dict.py", "tools/build_dict.py", ".github/workflows/pages.yml"]
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,6 +22,8 @@ jobs:
           python-version: "3.11"
       - name: 辞書を作る
         run: python tools/build_pwa_dict.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: pwa

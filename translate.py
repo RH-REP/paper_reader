@@ -112,6 +112,27 @@ def view(paper_dir: Path, paper: dict) -> tuple[dict, dict]:
     return {**st, "state": "running", "done": len(ja), "total": len(its)}, ja
 
 
+RETRIES, RETRY_WAIT = 2, 3.0
+
+
+def call(exe: Path, texts: list[str]) -> dict:
+    """訳す。「使える」（installed）以外が返ったら、少し待って2回まで呼び直す。
+    翻訳データが入っているのに、たまに1回だけ未導入（supported）やエラーが返ることがあるため（2026-09-24 に2回見た）。
+    3回とも同じなら、その答えを返す（本当に未導入なら need_install になる）。最後の答えの中身は "raw" に残す。"""
+    import time
+    res = {}
+    for i in range(RETRIES + 1):
+        res = _call(exe, texts)
+        if res.get("status") == "installed":
+            if i:
+                res["retried"] = i
+            return res
+        if i < RETRIES:
+            time.sleep(RETRY_WAIT)
+    res["raw"] = {k: v for k, v in res.items() if k != "translations"}
+    return res
+
+
 def _call(exe: Path, texts: list[str]) -> dict:
     r = subprocess.run([str(exe)], input=json.dumps({"source": "en", "target": "ja", "texts": texts}),
                        capture_output=True, text=True, timeout=600)
@@ -135,9 +156,10 @@ def generate(paper_dir: Path, paper: dict) -> dict:
         exe = translator() if todo else None
         for i in range(0, len(todo), CHUNK):
             chunk = todo[i:i + CHUNK]
-            res = _call(exe, [t for _, t in chunk])
+            res = call(exe, [t for _, t in chunk])
+            st["retried"] = st.get("retried", 0) + res.get("retried", 0)
             if res.get("status") == "supported":
-                st.update(state="need_install", error=INSTALL_HINT, items={}, done=0)
+                st.update(state="need_install", error=INSTALL_HINT, items={}, done=0, raw=res.get("raw"))
                 return st
             if res.get("status") != "installed":
                 st.update(state="unsupported" if res.get("status") == "unsupported" else "error",

@@ -5,15 +5,17 @@
 //   words    headword → {headword, meaning, source, first_seen, examples[], origin}
 //   reviews  uid → {uid, headword, rating, reviewed_at, device}   答えの記録（Mac のものも含む）
 //   lookups  uid → スマホで引いた記録（Mac に戻す）
+//   positions paper_id → しおり {paper_id, sentence, section, item_id, offset, done, total, updated_at, device}
+//   marks    uid → 文の印 {uid, paper_id, sentence, section, note, created_at, updated_at, deleted, device}
 //   kv       設定など（device, last_export_at, ...）
 const NAME = "paper_reader";
-const STORES = ["papers", "audio", "figures", "words", "reviews", "lookups", "kv"];
+const STORES = ["papers", "audio", "figures", "words", "reviews", "lookups", "kv", "positions", "marks"];
 let dbp = null;
 
 function open() {
   if (dbp) return dbp;
   dbp = new Promise((resolve, reject) => {
-    const req = indexedDB.open(NAME, 2);           // 2: figures を足した（前からある保存はそのまま）
+    const req = indexedDB.open(NAME, 3);           // 2: figures、3: positions・marks を足した（前からある保存はそのまま）
     req.onupgradeneeded = () => {
       const db = req.result;
       for (const s of STORES) if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);

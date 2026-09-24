@@ -106,3 +106,16 @@ button,.btn{font:inherit;font-size:15px;padding:9px 14px;border-radius:10px;bord
 .lb-row{display:flex;gap:8px;justify-content:space-between}
 .help ol,.help ul{padding-left:22px}
 .help li{margin:6px 0}
+/* しおり・印・図への参照 */
+.list li .pbar{display:block;height:3px;border-radius:2px;background:var(--line);margin-top:5px;overflow:hidden}
+.list li .pbar i{display:block;height:100%;background:var(--accent)}
+.nowrow{display:flex;align-items:flex-start;gap:6px}.nowrow .now{flex:1}
+.nowfig{max-height:64px;max-width:96px;border:1px solid var(--line);border-radius:6px;background:#fff}
+.mk{border:none;background:none;padding:0 6px 0 0;font-size:18px;line-height:1.1;color:var(--muted)}
+.mk.on{color:#d19a00}
+.sec ol li.marked{background:linear-gradient(90deg,rgba(209,154,0,.14),transparent 70%);border-radius:4px}
+a.fr{color:var(--accent);text-decoration:underline dotted;text-underline-offset:2px}
+a.fr.missing{color:inherit;text-decoration:none}
+.markslist{padding-left:18px;font-size:14.5px}.markslist li{margin:8px 0}
+.markslist .where{font-size:12px;color:var(--muted)}.markslist .note{font-size:13px;color:var(--ink2)}
+.w.term{text-decoration:underline dotted var(--muted);text-underline-offset:3px}

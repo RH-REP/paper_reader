@@ -164,3 +164,37 @@ button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);bor
 .sec .ed .lv{font-family:ui-monospace,Menlo,monospace;font-weight:700;min-width:30px}
 .sec ol li .cut{font-size:11px;padding:0 6px;margin-left:6px;border-radius:99px;color:var(--back);vertical-align:1px}
 .editing .sec ol li:hover{background:var(--hover)}
+/* しおり・印・図への参照 */
+.list li .pbar{display:block;height:3px;border-radius:2px;background:var(--line);margin-top:4px;overflow:hidden}
+.list li .pbar i{display:block;height:100%;background:var(--accent)}
+.list li.on .pbar{background:rgba(255,255,255,.35)}.list li.on .pbar i{background:var(--accent-ink)}
+.nowrow{display:flex;align-items:flex-start;gap:8px}
+.nowrow .now{flex:1;margin:0}
+.nowfig{max-height:84px;max-width:140px;border:1px solid var(--line);border-radius:6px;cursor:zoom-in;background:#fff}
+.mk{border:none;background:none;padding:0 4px;font-size:15px;line-height:1.2;color:var(--muted);cursor:pointer}
+.mk.on{color:#d19a00}
+.sec ol li .mk{visibility:hidden;margin-right:2px}
+.sec ol li:hover .mk,.sec ol li .mk.on{visibility:visible}
+.sec ol li.marked{background:linear-gradient(90deg,rgba(209,154,0,.12),transparent 60%);border-radius:4px}
+a.fr{color:var(--accent);text-decoration:underline dotted;text-underline-offset:2px;cursor:zoom-in}
+a.fr.missing{color:inherit;text-decoration:none;cursor:text}
+.markspanel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:6px 0 10px}
+.markslist{list-style:none;margin:0;padding:0}
+.markslist li{border-bottom:1px solid var(--line);padding:8px 0}
+.markslist .where{font-size:12px;color:var(--muted)}
+.markslist .en{cursor:pointer}.markslist .en:hover{color:var(--accent)}
+.markslist .ja{font-size:13px;color:var(--ink2)}
+.markslist textarea{width:100%;margin-top:4px;font:13px/1.5 -apple-system,sans-serif;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 8px;resize:vertical;min-height:30px}
+/* 読み方の辞書 */
+.wc-read{margin:6px 0 2px;font-size:12.5px}
+.prontable{width:100%;border-collapse:collapse;font-size:13.5px}
+.prontable th{text-align:left;color:var(--ink2);font-weight:500;padding:2px 4px}
+.prontable td{padding:2px 4px}.prontable input[type=text]{width:100%;margin:0}
+/* 専門用語 */
+.w.term{text-decoration:underline dotted var(--muted);text-underline-offset:3px}
+.termtable{width:100%;border-collapse:collapse;font-size:13.5px;margin:4px 0 12px}
+.termtable th{text-align:left;color:var(--ink2);font-weight:500;border-bottom:1px solid var(--line);padding:3px 4px}
+.termtable td{border-bottom:1px solid var(--line);padding:3px 4px;vertical-align:top}
+.termtable .tm{font-weight:600;cursor:pointer}.termtable .tm:hover{color:var(--accent)}
+.termtable .ex{color:var(--muted);font-size:12px}
+.termtable td.n{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}

@@ -22,6 +22,9 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
+import pronounce
+
+PRONOUNCER = pronounce.Pronouncer(None)   # 読み方の直し。サーバーは自分の辞書（pronunciations.json）付きのものに差し替える
 RATE_HZ = 22050
 DATA_FORMAT = f"LEI16@{RATE_HZ}"
 GAP_AFTER_HEADING = 0.7
@@ -58,10 +61,10 @@ def items(paper: dict) -> list[dict]:
     """読み上げる単位の一覧（見出し＋文）。画面の再生順と同じ。"""
     out = []
     for sec in paper["sections"]:
-        out.append({"id": f"{sec['id']}_h", "sec": sec["id"], "text": sec["speech_title"], "heading": True})
+        out.append({"id": f"{sec['id']}_h", "sec": sec["id"], "text": PRONOUNCER.apply(sec["speech_title"]), "heading": True})
         for k, s in enumerate(sec["sentences"], 1):
             if s["s"]:
-                out.append({"id": f"{sec['id']}_{k}", "sec": sec["id"], "text": s["s"], "heading": False})
+                out.append({"id": f"{sec['id']}_{k}", "sec": sec["id"], "text": PRONOUNCER.apply(s["s"]), "heading": False})
     return out
 
 
@@ -253,15 +256,16 @@ def generate(paper_dir: Path, paper: dict, voice: str | None = None, rate: int =
 def word_audio(words_dir: Path, word: str, voice: str | None, rate: int) -> Path | None:
     """単語の発音（data/words/<声>/<word>.m4a）。無ければ作る。声を変えたら別に作る。"""
     w = word.lower()
-    if not re.fullmatch(r"[a-z][a-z\-']{0,40}", w):
+    if not re.fullmatch(r"[a-z0-9][a-z0-9\-']{0,40}", w):
         return None
     v = resolve_voice(voice)
     words_dir = words_dir / re.sub(r"[^A-Za-z0-9]+", "_", v or "default")
     words_dir.mkdir(parents=True, exist_ok=True)
-    m4a = words_dir / f"{w}.m4a"
+    spoken = PRONOUNCER.apply(word)                      # 読み方の辞書で直した読み（直したら別のファイル）
+    m4a = words_dir / (f"{w}.m4a" if spoken == word else f"{w}__{_cache_key(v, rate, spoken)[:8]}.m4a")
     if not m4a.exists():
-        wav = words_dir / f"{w}.wav"
-        _say(word, wav, v, rate)
+        wav = m4a.with_suffix(".wav")
+        _say(spoken, wav, v, rate)
         _to_m4a(wav, m4a)
         wav.unlink(missing_ok=True)
     return m4a

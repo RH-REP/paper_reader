@@ -4,6 +4,7 @@ import * as db from "./db.js";
 import { lookup } from "./lookup.js";
 import * as srs from "./srs.js";
 import { unzipStored, text } from "./zip.js";
+import { fillWords as fillShared, labelKey, refKeys, resumeIndex } from "./shared.js";
 
 const VERSION = "8";
 const $ = (id) => document.getElementById(id);
@@ -12,14 +13,7 @@ const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: f
 
 // ---- 共通 ----
 function uid() { return crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "") : Math.random().toString(16).slice(2) + Date.now().toString(16); }
-function fillWords(el, t) {
-  el.textContent = "";
-  for (const part of t.split(/([A-Za-z](?:[A-Za-z'’\-]*[A-Za-z])?)/)) {
-    if (!part) continue;
-    if (/^[A-Za-z]/.test(part)) { const s = document.createElement("span"); s.className = "w"; s.textContent = part; el.appendChild(s); }
-    else el.appendChild(document.createTextNode(part));
-  }
-}
+function fillWords(el, t) { fillShared(el, t, { terms: S.terms }); }
 function markWord(t, head) {
   const el = document.createElement("span");
   const re = new RegExp(`\\b(${head.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\w*)`, "i");
@@ -51,15 +45,34 @@ addEventListener("hashchange", route);
 // ---- 論文 ----
 async function loadPapers() {
   S.papers = (await db.all("papers")).sort((a, b) => (a.meta.imported_at < b.meta.imported_at ? 1 : -1));
+  S.glossIndex = new Map();                          // 全部の論文の用語集 {語の鍵: {論文id: 項目}}（Mac の App.glossary_index と同じ）
+  for (const p of S.papers) for (const t of p.glossary || []) {
+    if (t.kind === "phrase" || !t.ja) continue;
+    const k = termKey(t.term);
+    const per = S.glossIndex.get(k) || {};
+    if (!per[p.id] || per[p.id].count < t.count) per[p.id] = { ...t, paper: p.meta.title };
+    S.glossIndex.set(k, per);
+  }
   const ul = $("paperList");
   ul.innerHTML = "";
   $("paperEmpty").hidden = S.papers.length > 0;
+  const positions = await db.all("positions");
+  const marks = (await db.all("marks")).filter((m) => !m.deleted);
   for (const p of S.papers) {
     const li = document.createElement("li");
     li.textContent = p.meta.title;
     const sm = document.createElement("small");
-    sm.textContent = (p.meta.source === "text" ? "テキスト" : `${p.meta.pages}ページ`) + `・${p.meta.sections}章・${p.meta.sentences}文`;
+    const nm = marks.filter((m) => m.paper_id === p.id).length;
+    sm.textContent = (p.meta.source === "text" ? "テキスト" : `${p.meta.pages}ページ`) + `・${p.meta.sections}章・${p.meta.sentences}文`
+      + (nm ? `・★${nm}` : "");
     li.appendChild(sm);
+    const pos = positions.find((x) => x.paper_id === p.id);
+    if (pos?.total) {
+      const bar = document.createElement("span");
+      bar.className = "pbar";
+      bar.innerHTML = `<i style="width:${Math.min(100, (pos.done / pos.total) * 100).toFixed(1)}%"></i>`;
+      li.appendChild(bar);
+    }
     li.onclick = () => openPaper(p.id);
     ul.appendChild(li);
   }
@@ -73,7 +86,16 @@ async function openPaper(id) {
   $("paperPick").hidden = true;
   $("paperView").hidden = false;
   $("paperTitle").textContent = p.meta.title;
-  renderFigures(p);
+  S.terms = new Set();
+  for (const t of p.glossary || []) {
+    if (t.kind === "phrase") continue;
+    const k = t.term.toLowerCase();
+    S.terms.add(k); S.terms.add(k + "s");
+  }
+  S.marks = (await db.all("marks")).filter((m) => m.paper_id === id && !m.deleted);
+  S.position = await db.get("positions", id);
+  renderResume();
+  await renderFigures(p);
   const ol = $("sections");
   ol.innerHTML = "";
   for (const sec of p.paper.sections) {
@@ -102,6 +124,8 @@ async function openPaper(id) {
       sec.sentences.forEach((s, k) => {
         const x = document.createElement("li");
         x.dataset.t = s.t;                             // 辞書に渡す文（▶ の文字を混ぜない）
+        x.appendChild(markButton(s.t, sec.title));
+        x.classList.toggle("marked", isMarked(s.t));
         if (s.s) {
           const b = document.createElement("button");
           b.className = "sp";
@@ -122,6 +146,8 @@ async function openPaper(id) {
     }
     ol.appendChild(li);
   }
+  markRefs();
+  renderMarks();
 }
 // ---- 図・表・数式（画像として開く）----
 const figUrls = [];
@@ -154,6 +180,11 @@ async function renderFigures(p) {
   }
   $("figBtn").hidden = !S.figs.length;
   $("figBtn").textContent = `図・表・数式（${S.figs.length}）`;
+  S.figKeys = new Map();
+  S.figs.forEach((f, i) => { const k = labelKey(f.label); if (k && !S.figKeys.has(k)) S.figKeys.set(k, i); });
+}
+function markRefs(root = document) {
+  root.querySelectorAll("a.fr").forEach((a) => a.classList.toggle("missing", !S.figKeys?.has(a.dataset.key)));
 }
 $("figBtn").onclick = () => { $("figPanel").hidden = !$("figPanel").hidden; };
 function openLightbox(i) {
@@ -208,14 +239,98 @@ function sentenceItem(sec, k) {
   return { id: `${sec.id}_${k + 1}`, sec, n: k + 1, text: s.s, show: s.t };
 }
 
-function play(items, start = 0) {
+function play(items, start = 0, opts = {}) {
   stop();
   if (!items.length) return;
-  Object.assign(S, { items, pos: start, playing: true, paused: false });
+  Object.assign(S, { items, pos: Math.min(start, items.length - 1), playing: true, paused: false });
   buildTimeline();
   $("player").hidden = false;
-  speakCurrent();
+  renderResume();
+  speakCurrent(opts.at ? { at: opts.at } : {});
 }
+
+// ---- しおり（文の中身で覚える。Mac と同じ規則。記録を Mac に戻すと合わさる）----
+async function savePosition(force = false, finished = false) {
+  if (!S.paper || !S.items.length) return;
+  if (S.items.length < 2) return;                  // 1文だけの再生（文の ▶・印から）ではしおりを動かさない
+  const it = S.items[Math.min(S.pos, S.items.length - 1)];
+  const now = Date.now();
+  if (!force && S.lastSave && now - S.lastSave < 4000 && S.lastSaveId === it.id) return;
+  S.lastSave = now;
+  S.lastSaveId = it.id;
+  const full = itemsFor(null);
+  const pos = { paper_id: S.paper.id, sentence: it.show, section: it.sec.title, item_id: it.id,
+                offset: finished ? 0 : Math.round((S.player.currentTime || 0) * 10) / 10,
+                done: finished ? full.length : Math.max(0, full.findIndex((x) => x.id === it.id)), total: full.length,
+                updated_at: new Date().toISOString(), device: S.device };
+  S.position = pos;
+  await db.put("positions", pos.paper_id, pos);
+}
+addEventListener("pagehide", () => savePosition(true));
+document.addEventListener("visibilitychange", () => { if (document.hidden) savePosition(true); });
+function renderResume() {
+  const pos = S.position;
+  const can = pos && pos.total && pos.done < pos.total && !S.playing;
+  $("playAll").textContent = can ? `▶ 続きから（${Math.round((pos.done / pos.total) * 100)}%）` : "▶ 全体を読む";
+  $("playTop").hidden = !can;
+}
+function playAllOrResume(fromTop = false) {
+  if (!S.paper) return;
+  const items = itemsFor(null);
+  const pos = S.position;
+  if (fromTop || !pos || !pos.total || pos.done >= pos.total) return play(items);
+  const r = resumeIndex(items, pos);
+  play(items, r.index, { at: r.exact ? Math.max(0, r.at - 1) : 0 });
+}
+
+// ---- 文の印（★）----
+function isMarked(t) { return (S.marks || []).some((m) => m.sentence === t); }
+function markButton(t, section) {
+  const b = document.createElement("button");
+  const on = isMarked(t);
+  b.className = "mk" + (on ? " on" : "");
+  b.textContent = on ? "★" : "☆";
+  b.onclick = (e) => { e.stopPropagation(); toggleMark(t, section); };
+  return b;
+}
+async function toggleMark(t, section) {
+  if (!S.paper || !t) return;
+  const now = new Date().toISOString();
+  const cur = (S.marks || []).find((m) => m.sentence === t);
+  if (cur) await db.put("marks", cur.uid, { ...cur, deleted: 1, updated_at: now, device: S.device });   // 消したことも Mac に伝える
+  else {
+    const m = { uid: uid(), paper_id: S.paper.id, sentence: t, section, note: "", created_at: now, updated_at: now, deleted: 0, device: S.device };
+    await db.put("marks", m.uid, m);
+  }
+  S.marks = (await db.all("marks")).filter((m) => m.paper_id === S.paper.id && !m.deleted);
+  document.querySelectorAll("#sections li[data-t]").forEach((li) => {
+    if (li.dataset.t !== t) return;
+    li.classList.toggle("marked", !cur);
+    li.querySelector(".mk").replaceWith(markButton(t, section));
+  });
+  if (S.playing && S.items[S.pos]?.show === t) { $("nowMark").classList.toggle("on", !cur); $("nowMark").textContent = cur ? "☆" : "★"; }
+  renderMarks();
+}
+function renderMarks() {
+  const marks = S.marks || [];
+  $("marksBtn").hidden = !marks.length;
+  $("marksBtn").textContent = `★ 印（${marks.length}）`;
+  const ol = $("marksList");
+  ol.textContent = "";
+  const full = itemsFor(null);
+  const idx = new Map(full.map((it, i) => [it.show, i]));
+  for (const m of [...marks].sort((a, b) => (idx.get(a.sentence) ?? 1e9) - (idx.get(b.sentence) ?? 1e9))) {
+    const li = document.createElement("li");
+    li.innerHTML = '<div class="where"></div><div class="en"></div>';
+    li.querySelector(".where").textContent = m.section || "";
+    li.querySelector(".en").textContent = m.sentence;
+    if (m.note) { const n = document.createElement("div"); n.className = "note"; n.textContent = `メモ: ${m.note}`; li.appendChild(n); }
+    li.onclick = () => { if (idx.has(m.sentence)) play(full, idx.get(m.sentence)); };
+    ol.appendChild(li);
+  }
+}
+$("marksBtn").onclick = () => { $("marksPanel").hidden = !$("marksPanel").hidden; };
+$("nowMark").onclick = () => { const it = S.items[S.pos]; if (it && !it.heading) toggleMark(it.show, it.sec.title); };
 
 // ---- プログレスバー（今の再生範囲の全体。動かすとその位置へ）----
 // 各文の長さ（Mac から来た durations）があれば秒で、無ければ何文目かで表す
@@ -272,7 +387,7 @@ function advance(g) { if (g !== S.gen || S.paused) return; S.pos++; speakCurrent
 async function speakCurrent(opts = {}) {
   const g = ++S.gen;
   halt();
-  if (S.pos >= S.items.length) { S.playing = false; $("status").textContent = "読み終わりました"; setMedia(); return; }
+  if (S.pos >= S.items.length) { savePosition(true, true); S.playing = false; $("status").textContent = "読み終わりました"; setMedia(); renderResume(); return; }
   const it = S.items[S.pos];
   showProgress();
   const blob = await db.get("audio", `${S.paper.id}/${it.id}`);
@@ -303,7 +418,7 @@ async function speakCurrent(opts = {}) {
 function pauseResume() {
   if (!S.playing) return;
   if (S.paused) { S.paused = false; if (S.player.src) S.player.play(); else speakCurrent(); }
-  else { S.paused = true; if (S.player.src) S.player.pause(); else { S.gen++; speechSynthesis.cancel(); } }
+  else { S.paused = true; savePosition(true); if (S.player.src) S.player.pause(); else { S.gen++; speechSynthesis.cancel(); } }
   showProgress();
   setMedia();
 }
@@ -327,11 +442,13 @@ function seekBy(sec) {
 
 function step(d) { if (!S.playing) return; S.pos = Math.max(0, Math.min(S.items.length - 1, S.pos + d)); S.paused = false; speakCurrent(); }
 function stop() {
+  savePosition(true);
   S.gen++;
   Object.assign(S, { playing: false, paused: false, items: [] });
   halt();
   $("player").hidden = true;
   setMedia();
+  renderResume();
 }
 function showProgress() {
   const it = S.items[S.pos];
@@ -339,7 +456,16 @@ function showProgress() {
   $("status").textContent = `${S.paused ? "一時停止中 — " : ""}${it.sec.title} ・ ${where}（${S.pos + 1}/${S.items.length}）`;
   $("pause").textContent = S.paused ? "▶" : "⏸";
   $("nowText").dataset.sec = it.sec.id;
+  $("nowText").dataset.t = it.heading ? "" : it.show;
   fillWords($("nowText"), it.show);
+  markRefs($("nowText"));
+  $("nowMark").hidden = !!it.heading;
+  $("nowMark").classList.toggle("on", !it.heading && isMarked(it.show));
+  $("nowMark").textContent = !it.heading && isMarked(it.show) ? "★" : "☆";
+  const fk = it.heading ? [] : refKeys(it.show).filter((k) => S.figKeys?.has(k));
+  $("nowFig").hidden = !fk.length;
+  if (fk.length) { const i = S.figKeys.get(fk[0]); $("nowFig").src = S.figs[i].url; $("nowFig").onclick = () => openLightbox(i); }
+  savePosition(S.paused);
 }
 // ロック画面・通知の操作
 function setMedia() {
@@ -357,7 +483,8 @@ if ("mediaSession" in navigator) {
   navigator.mediaSession.setActionHandler("seekbackward", (d) => seekBy(-(d.seekOffset || 10)));   // ロック画面の戻す・進める
   navigator.mediaSession.setActionHandler("seekforward", (d) => seekBy(d.seekOffset || 10));
 }
-$("playAll").onclick = () => S.paper && play(itemsFor(null));
+$("playAll").onclick = () => playAllOrResume();
+$("playTop").onclick = () => playAllOrResume(true);
 $("pause").onclick = pauseResume;
 $("prev").onclick = () => step(-1);
 document.querySelectorAll("[data-seek]").forEach((b) => (b.onclick = () => seekBy(Number(b.dataset.seek))));
@@ -430,13 +557,30 @@ function sayWord(w) {
   speechSynthesis.speak(u);
 }
 
+// 辞書に無い語（派生語・部分でしか引けない語も）は、論文の用語集の訳を出す（Mac の App.lookup と同じ）
+function termKey(w) {
+  w = w.toLowerCase();
+  return w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w;
+}
+function glossaryLookup(r, word) {
+  if (r.found && !["近い語", "部分"].includes(r.note)) return r;
+  const per = S.glossIndex?.get(termKey(r.normalized || word));
+  if (!per) return r;
+  const t = per[S.paper?.id] || Object.values(per).sort((a, b) => b.count - a.count)[0];
+  const mean = t.ja + (t.expansion ? `（${t.expansion}）` : "");
+  return { ...r, found: true, source: `用語集（端末内の翻訳・${(t.paper || "").slice(0, 40)}）`, headword: t.term,
+           entries: [{ word: t.term, mean }, ...(r.found ? r.entries : [])], note: "専門用語" };
+}
+
 async function lookupAndShow(word, ctx = {}) {
-  const r = await lookup(word);
+  const r = glossaryLookup(await lookup(word), word);
   if (r.found) r.registered = !!(await db.get("words", r.headword));
   showWord(r, ctx);
 }
 
 document.addEventListener("click", (e) => {
+  const fr = e.target.closest("a.fr");
+  if (fr) { e.preventDefault(); if (S.figKeys?.has(fr.dataset.key)) openLightbox(S.figKeys.get(fr.dataset.key)); return; }
   const w = e.target.closest(".w");
   if (!w) return;
   document.querySelectorAll(".w.hit").forEach((x) => x.classList.remove("hit"));
@@ -553,7 +697,9 @@ async function importBundle(file) {
     const durations = du ? JSON.parse(text(du)) : null;              // 各文の音声の長さ（プログレスバー用）
     const fj = files.get(`papers/${pid}/figures.json`);
     const figs = fj ? (JSON.parse(text(fj)).items || []) : [];             // 図・表・数式の一覧
-    const entries = [["papers", pid, { id: pid, meta, paper, ja, durations, figures: figs }]];
+    const gj = files.get(`papers/${pid}/glossary.json`);
+    const glossary = gj ? (JSON.parse(text(gj)).terms || []) : [];         // 専門用語（辞書に無い語をこれで引く）
+    const entries = [["papers", pid, { id: pid, meta, paper, ja, durations, figures: figs, glossary }]];
     for (const it of figs) {
       const bytes = files.get(`papers/${pid}/figures/${it.file}`);
       if (bytes) entries.push(["figures", `${pid}/${it.file}`, new Blob([bytes], { type: "image/png" })]);
@@ -573,6 +719,8 @@ async function importBundle(file) {
   }
   for (const r of vocab.reviews) entries.push(["reviews", r.uid, r]);
   await db.putMany(entries);
+  const st = files.get("state.json");
+  if (st) await mergeState(JSON.parse(text(st)));
   await kv("last_import", { at: new Date().toISOString(), created_at: man.created_at, papers: man.papers.length });
   return `読み込みました: 論文 ${man.papers.length} 本（音声 ${nAudio} 本）、単語 ${vocab.words.length} 語、答えの記録 ${vocab.reviews.length} 件`;
 }
@@ -589,10 +737,22 @@ $("importInput").onchange = async (e) => {
   } catch (err) { $("importMsg").textContent = "読み込めませんでした: " + err.message; }
 };
 
+// Mac から来たしおりと印を合わせる（更新日時の新しいほうが勝つ。Mac の state.py と同じ規則）
+async function mergeState(st) {
+  const newer = (a, b) => !b || new Date(a.updated_at) > new Date(b.updated_at);
+  const entries = [];
+  for (const p of st.positions || []) if (newer(p, await db.get("positions", p.paper_id))) entries.push(["positions", p.paper_id, p]);
+  for (const m of st.marks || []) if (newer(m, await db.get("marks", m.uid))) entries.push(["marks", m.uid, m]);
+  if (entries.length) await db.putMany(entries);
+}
+
 async function exportProgress() {
   const lookups = await db.all("lookups");
   const reviews = (await db.all("reviews")).filter((r) => r.device === S.device);
-  const data = { kind: "paper_reader_progress", version: 1, device: S.device, exported_at: new Date().toISOString(), lookups, reviews };
+  const positions = await db.all("positions");
+  const marks = await db.all("marks");
+  const data = { kind: "paper_reader_progress", version: 1, device: S.device, exported_at: new Date().toISOString(), lookups, reviews,
+                 positions, marks };
   const d = new Date(), z = (n) => String(n).padStart(2, "0");
   const stamp = `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}`;
   const name = `paper_reader_progress_${stamp}.json`;

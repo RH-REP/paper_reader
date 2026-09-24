@@ -5,7 +5,7 @@
 // 版を上げると古い保存は消える。新しい版に切り替わると、画面（js/app.js）が1回だけ読み直す。
 const CACHE = "paper_reader-v8";
 const SHELL = ["./", "index.html", "app.css", "manifest.webmanifest", "js/app.js", "js/db.js", "js/lookup.js",
-               "js/srs.js", "js/zip.js", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png"];
+               "js/srs.js", "js/zip.js", "js/shared.js", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: "reload" }))))

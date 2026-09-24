@@ -25,10 +25,12 @@
       <button id="backToList" class="link">← 論文の一覧</button>
       <h2 id="paperTitle"></h2>
       <p class="row"><button id="playAll" class="primary">▶ 全体を読む</button>
+        <button id="playTop" class="btn" hidden>最初から</button>
         <label class="muted"><input type="checkbox" id="skipBack" checked> 後付けを飛ばす</label>
         <label class="muted"><input type="checkbox" id="showJa" checked> 訳</label></p>
-      <p><button id="figBtn" class="btn" hidden>図・表・数式</button></p>
+      <p><button id="figBtn" class="btn" hidden>図・表・数式</button> <button id="marksBtn" class="btn" hidden>★ 印</button></p>
       <div id="figPanel" hidden><div id="figGrid" class="figgrid"></div></div>
+      <div id="marksPanel" hidden><p class="muted small">印は Mac に戻すと、Mac で Markdown に書き出せます。押すとその文から再生します。</p><ol id="marksList" class="markslist"></ol></div>
       <ol id="sections" class="sections"></ol>
     </div>
   </section>
@@ -138,7 +140,8 @@
     <input type="range" id="progress" min="0" max="1000" step="1" value="0" aria-label="再生位置（動かすとその位置へ）">
     <span id="tTot" class="t">0:00</span>
   </div>
-  <p id="nowText" class="now"></p>
+  <div class="nowrow"><button id="nowMark" class="mk" title="この文に印">☆</button><p id="nowText" class="now"></p>
+    <img id="nowFig" class="nowfig" hidden alt=""></div>
   <div class="prow">
     <button id="prev" class="icon" title="前の文">⏮</button>
     <button data-seek="-10" class="seek">−10</button>

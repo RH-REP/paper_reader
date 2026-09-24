@@ -3,6 +3,8 @@
 Mac → スマホ: paper_reader_<日時>.zip（ZIP。すべて無圧縮で格納。スマホ側は外部ライブラリなしで読む）
   manifest.json                      {"kind": "paper_reader_bundle", "version": 1, "created_at", "papers": [id...]}
   vocab.json                         単語帳（語・意味・例文）と答えの記録すべて（Vocab.export）
+  papers/<id>/glossary.json         専門用語の一覧と訳
+  state.json                         しおりと文の印（State.export。消した印も deleted で入る）
   papers/<id>/meta.json              題名など
   papers/<id>/sentences.json         章と文
   papers/<id>/translation.json       文ごとの日本語訳（作ってあれば）
@@ -30,7 +32,7 @@ PROGRESS_KIND = "paper_reader_progress"
 VERSION = 1
 
 
-def make_bundle(store, vocab, paper_ids: list[str], out_dir: Path) -> Path:
+def make_bundle(store, vocab, paper_ids: list[str], out_dir: Path, state=None) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     for old in out_dir.glob("paper_reader_*.zip"):
         old.unlink()                                      # 受け渡し用の置き場なので、前のものは残さない
@@ -52,6 +54,8 @@ def make_bundle(store, vocab, paper_ids: list[str], out_dir: Path) -> Path:
                     f = d / "figures" / str(it.get("file", ""))
                     if f.is_file() and f.suffix == ".png":
                         z.write(f, f"papers/{pid}/figures/{f.name}", compress_type=zipfile.ZIP_STORED)
+            if (d / "glossary.json").exists():             # 専門用語（スマホでも、辞書に無い語をこれで引く）
+                z.write(d / "glossary.json", f"papers/{pid}/glossary.json", compress_type=zipfile.ZIP_STORED)
             if (d / "translation.json").exists():
                 tr, ja = translate.view(d, paper)          # 章を編集した直後でも、今の文の番号で入れる
                 z.writestr(f"papers/{pid}/translation.json", json.dumps({**tr, "items": ja}, ensure_ascii=False),
@@ -71,6 +75,8 @@ def make_bundle(store, vocab, paper_ids: list[str], out_dir: Path) -> Path:
             for e in w["examples"]:
                 e["audio_ref"] = _audio_ref(store, e.get("paper_id"), e.get("sentence"))
         z.writestr("vocab.json", json.dumps(voc, ensure_ascii=False), compress_type=zipfile.ZIP_STORED)
+        if state is not None:
+            z.writestr("state.json", json.dumps(state.export(), ensure_ascii=False), compress_type=zipfile.ZIP_STORED)
         z.writestr("manifest.json", json.dumps({"kind": BUNDLE_KIND, "version": VERSION,
                                                 "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
                                                 "papers": included}, ensure_ascii=False))

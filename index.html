@@ -117,12 +117,27 @@
       <h2 id="paperTitle"></h2>
       <p id="paperMeta" class="muted"></p>
       <p class="audioline"><button id="figBtn" class="small" hidden>図・表・数式</button>
+        <button id="marksBtn" class="small" hidden>★ 印</button>
+        <button id="termsBtn" class="small" hidden>用語</button>
         <button id="editBtn" class="small" aria-pressed="false" title="見出しの段を上げ下げ・章を分ける・つなぐ・名前を変える">章を編集</button>
         <button id="aiBtn" class="small">AI に手直しを頼む（プロンプトをコピー）</button>
         <span id="manualTag" class="muted"></span></p>
       <div id="figPanel" class="figpanel" hidden>
         <p class="muted">押すと大きく開きます。線で描かれた図・表・数式が抜けている、番号が違うときは「AI に手直しを頼む」で直せます。</p>
         <div id="figGrid" class="figgrid"></div>
+      </div>
+      <div id="termsPanel" class="markspanel" hidden>
+        <p class="muted">この論文によく出る専門用語（辞書に無い語・略語・よく出る句）。訳は Mac 内蔵の翻訳。本文では点線の付いた語で、押すとこの訳が出ます。
+          語を押すと辞書のカード、「登録」で単語帳へ（最初に出てきた文が例文になります）。</p>
+        <div id="termsBody"></div>
+      </div>
+      <div id="marksPanel" class="markspanel" hidden>
+        <p class="muted">文の ☆ を押すか、再生中に <kbd>M</kbd> で印が付きます。押すとその文から続けて再生します。メモは書くとすぐ保存されます。</p>
+        <ol id="marksList" class="markslist"></ol>
+        <p><button id="marksCopy" class="primary">Markdown をコピー</button>
+          <button id="marksSave" class="small">.md に保存</button>
+          <label class="muted"><input type="checkbox" id="marksAll"> 全部の論文</label>
+          <span id="marksMsg" class="muted"></span></p>
       </div>
       <div id="aiPanel" class="aipanel" hidden>
         <p class="muted">章分け・単語の区切り・文の切れ目・OCR などがうまくいかなかったとき、下の文を Claude Code などファイルを読み書きできる AI に貼ると、
@@ -142,6 +157,7 @@
       <div class="player">
         <div class="row">
           <button id="playAll" class="primary">▶ 全体を読む</button>
+          <button id="playTop" class="small" hidden title="しおりを使わずに最初から">最初から</button>
           <button id="prev" title="前の文">⏮</button>
           <button data-seek="-10" class="seek" title="10秒戻す（Shift+←）">−10秒</button>
           <button data-seek="-5" class="seek" title="5秒戻す（←）">−5秒</button>
@@ -157,13 +173,18 @@
           <input type="range" id="progress" min="0" max="1000" step="1" value="0" aria-label="再生位置（動かすとその位置へ）">
           <span id="tTot" class="t">0:00</span>
         </div>
-        <p id="nowText" class="now" hidden></p>
+        <div id="nowRow" class="nowrow" hidden>
+          <button id="nowMark" class="mk" title="この文に印を付ける（M）">☆</button>
+          <p id="nowText" class="now"></p>
+          <img id="nowFig" class="nowfig" hidden alt="" title="この文が指す図（押すと大きく開く）">
+        </div>
         <div class="row opts">
           <label>再生速度 <input type="range" id="speed" min="0.7" max="2" step="0.05" value="1"> <span id="speedVal">1.00</span>×</label>
           <label><input type="checkbox" id="skipBack" checked> 後付け（References など）を「全体」で読まない</label>
           <label><input type="checkbox" id="showJa" checked> 訳を表示</label>
           <label>声 <select id="voice"></select></label>
           <button id="regen" class="small" hidden>この声で作り直す</button>
+          <button id="pronBtn" class="small" title="略語・単位などの読み方">読み方の辞書</button>
         </div>
       </div>
 
@@ -172,6 +193,18 @@
     </div>
   </main>
 </div>
+
+<dialog id="pronDlg" class="pastedlg">
+  <h3>読み方の辞書</h3>
+  <p class="muted">音声を作るときだけ置き換えます（画面の文・訳・辞書は変わりません）。語全体に合うときだけ置き換え、「大小」に印があれば大文字小文字も区別します。
+    変えた語を含む文だけ、音声が作り直されます。<br>
+    単位・上付き・ギリシャ文字は組み込みで直します（7 μm → 7 micrometers、cm⁻² → centimeters to the minus 2、λ/14 → lambda over 14）。</p>
+  <table class="prontable"><thead><tr><th>書き方</th><th>読み方</th><th>大小</th><th></th></tr></thead><tbody id="pronRows"></tbody></table>
+  <p><button id="pronAdd" class="small">＋ 行を足す</button></p>
+  <label class="muted">文で試す <input id="pronTry" type="text" value="The DM stroke is 7 μm at 300 K." spellcheck="false"></label>
+  <p><button id="pronTryBtn" class="small">🔈 試聴</button> <span id="pronSpoken" class="muted"></span></p>
+  <p><button id="pronSave" class="primary">保存</button> <button id="pronClose">閉じる</button> <span id="pronMsg" class="muted"></span></p>
+</dialog>
 
 <dialog id="pasteDlg" class="pastedlg">
   <form id="pasteForm" method="dialog">
@@ -190,6 +223,7 @@
     <button id="wcSay" class="small" title="発音">🔈</button></div>
   <div id="wcMeans" class="wc-means"></div>
   <button id="wcRegister" class="primary wide-sm" hidden>単語帳に登録</button>
+  <div class="wc-read"><span id="wcRead" class="muted"></span> <button id="wcReadEdit" class="small" title="読み上げでのこの語の読み方を決める">読み方を直す</button></div>
   <div class="wc-foot muted"><span id="wcSource"></span> <a id="wcWeblio" target="_blank" rel="noopener">Weblio で見る ↗</a></div>
 </aside>
 
@@ -204,6 +238,6 @@
 </div>
 
 <div id="drop" class="drop" hidden>ここに PDF を落とすと取り込みます</div>
-<script src="assets/app.js"></script>
+<script type="module" src="assets/app.js"></script>
 </body>
 </html>

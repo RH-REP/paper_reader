@@ -9,6 +9,7 @@
 """
 import argparse
 import json
+import os
 import sqlite3
 import string
 import sys
@@ -24,7 +25,11 @@ RAW = f"https://raw.githubusercontent.com/{REPO}/{{ref}}/src/{{name}}"
 
 
 def fetch(url: str) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": "paper_reader"})
+    headers = {"User-Agent": "paper_reader"}
+    token = os.environ.get("GITHUB_TOKEN")
+    if token and url.startswith("https://api.github.com/"):
+        headers["Authorization"] = f"Bearer {token}"   # GitHub Actions では名乗って聞く（名乗らないと回数の制限で 403 になる）
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=60) as r:
         return r.read()
 

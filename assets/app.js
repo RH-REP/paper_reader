@@ -1,7 +1,8 @@
 // paper_reader の画面。論文の一覧・取り込み・章ごとの読み上げ・単語検索と単語帳。
 // 読み上げは、サーバーが say で作った1文ずつの m4a を順に鳴らす（どのブラウザでも同じ声）。
 // 音声がまだできていない間だけ、ブラウザの読み上げ（Web Speech API）で代わりに読む。
-"use strict";
+import { fillWords as fillShared, labelKey, refKeys, resumeIndex } from "./shared.js";
+
 const $ = (id) => document.getElementById(id);
 const S = { papers: [], paper: null, audio: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             cfg: null, player: new Audio(), poll: null, wordAudio: new Audio() };
@@ -20,21 +21,8 @@ async function api(path, opts) {
 const post = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" },
                                          body: JSON.stringify(body || {}) });
 
-// ---- 文を、クリックできる単語に分けて入れる ----
-function fillWords(el, text) {
-  el.textContent = "";
-  for (const part of text.split(/([A-Za-z](?:[A-Za-z'’\-]*[A-Za-z])?)/)) {
-    if (!part) continue;
-    if (/^[A-Za-z]/.test(part)) {
-      const s = document.createElement("span");
-      s.className = "w";
-      s.textContent = part;
-      el.appendChild(s);
-    } else {
-      el.appendChild(document.createTextNode(part));
-    }
-  }
-}
+// ---- 文を、クリックできる単語と図への参照に分けて入れる（shared.js）----
+function fillWords(el, text) { fillShared(el, text, { terms: S.terms }); }
 
 // ---- 論文の一覧と取り込み ----
 async function loadPapers(selectId) {
@@ -48,8 +36,16 @@ async function loadPapers(selectId) {
     li.textContent = m.title;
     const sm = document.createElement("small");
     sm.textContent = (m.source === "text" ? "テキスト" : `${m.pages}ページ`) + `・${m.sections}章・${m.sentences}文`
-      + (m.ocr_pages?.length ? `・OCR ${m.ocr_pages.length}ページ` : "");
+      + (m.ocr_pages?.length ? `・OCR ${m.ocr_pages.length}ページ` : "") + (m.marks ? `・★${m.marks}` : "");
     li.appendChild(sm);
+    const pos = m.position;
+    if (pos?.total) {                                // 聞いたところまで（しおり）
+      const bar = document.createElement("span");
+      bar.className = "pbar";
+      bar.title = `しおり: ${pos.section || ""}（${Math.round((pos.done / pos.total) * 100)}%）`;
+      bar.innerHTML = `<i style="width:${Math.min(100, (pos.done / pos.total) * 100).toFixed(1)}%"></i>`;
+      li.appendChild(bar);
+    }
     li.onclick = () => openPaper(m.id);
     ul.appendChild(li);
   }
@@ -120,6 +116,9 @@ async function openPaper(id) {
   const meta = S.papers.find((m) => m.id === id) || {};
   $("paperTitle").textContent = p.title || meta.title || id;
   S.openSecs = new Set();
+  S.marks = p.marks || [];
+  S.position = p.position || null;
+  setTerms(p.glossary);
   renderMeta();
   $("aiBtn").hidden = !p.has_pdf;                  // 貼り付けたテキストには元の PDF が無い
   renderSections();
@@ -129,16 +128,25 @@ async function openPaper(id) {
   watchTranslation();
   $("aiPanel").hidden = true;
   loadFigures();
+  renderMarks();
+  renderResume();
+  renderTerms();
+  watchTerms();
 }
 
 function renderMeta() {
   const p = S.paper;
   const meta = S.papers.find((m) => m.id === p.id) || {};
-  $("paperMeta").textContent = (p.has_pdf ? `${meta.source_name || ""} ・ ${p.pages}ページ` : "貼り付けたテキスト")
+  $("paperMeta").textContent = (p.has_pdf ? `${meta.source_name || ""} ・ ${meta.pages ?? p.pages ?? "?"}ページ` : "貼り付けたテキスト")
     + ` ・ ${p.sections.length}章` + (p.ocr_pages.length ? ` ・ OCR したページ: ${p.ocr_pages.join(", ")}` : "");
   const m = p.manual;
-  $("manualTag").textContent = !m ? "" : `${m.by === "user" ? "画面で編集済み" : "AI 手直し済み"}（${(m.edited_at || m.at || "").slice(0, 16).replace("T", " ")}）`
-    + (m.notes && m.by !== "user" ? `: ${m.notes}` : "");
+  const head = !m ? "" : `${m.by === "user" ? "画面で編集済み" : "AI 手直し済み"}（${(m.edited_at || m.at || "").slice(0, 16).replace("T", " ")}）`;
+  const notes = m?.notes && m.by !== "user" ? m.notes : "";
+  const tag = $("manualTag");                       // AI の手直しの説明は長いので、押すと全部出す
+  tag.textContent = head + (notes ? `: ${notes.length > 60 ? notes.slice(0, 60) + "…" : notes}` : "");
+  tag.title = notes;
+  tag.style.cursor = notes.length > 60 ? "pointer" : "";
+  tag.onclick = () => { if (notes.length > 60) tag.textContent = tag.textContent.endsWith("…") ? `${head}: ${notes}` : `${head}: ${notes.slice(0, 60)}…`; };
 }
 
 // ---- 図・表・数式（画像として開く）----
@@ -149,6 +157,9 @@ async function loadFigures() {
   const st = await api(`/api/papers/${id}/figures`).catch(() => ({ items: [] }));
   if (!S.paper || S.paper.id !== id) return;
   S.figures = (st.items || []).map((it) => ({ ...it, url: `/api/papers/${id}/figures/${it.file}` }));
+  S.figKeys = new Map();
+  S.figures.forEach((f, i) => { const k = labelKey(f.label); if (k && !S.figKeys.has(k)) S.figKeys.set(k, i); });
+  markRefs();
   const n = S.figures.length;
   $("figBtn").hidden = !n;
   $("figBtn").textContent = `図・表・数式（${n}）${st.manual ? " ・AI 手直し済み" : ""}`;
@@ -315,6 +326,8 @@ function renderSections() {
       sec.sentences.forEach((s, k) => {
         const x = document.createElement("li");
         x.dataset.t = s.t;                             // 辞書に渡す文（▶ の文字を混ぜない）
+        x.appendChild(markButton(s.t, sec.title));
+        x.classList.toggle("marked", isMarked(s.t));
         if (s.s) {
           const b = document.createElement("button");
           b.className = "sp";
@@ -348,6 +361,202 @@ function renderSections() {
     }
     ol.appendChild(li);
   }
+}
+
+// ---- しおり（聞いた位置）----
+// 位置は文の中身で覚える（章の編集や AI の手直しで番号がずれても戻れる）。文が変わるたび・一時停止・停止で保存する
+function savePosition(force = false, finished = false) {
+  if (!S.paper || !S.items.length || S.pos >= S.items.length && !finished) return;
+  if (S.items.length < 2) return;                  // 1文だけの再生（文の ▶・印から）ではしおりを動かさない
+  const it = S.items[Math.min(S.pos, S.items.length - 1)];
+  const now = Date.now();
+  if (!force && S.lastSave && now - S.lastSave < 4000 && S.lastSaveId === it.id) return;
+  S.lastSave = now;
+  S.lastSaveId = it.id;
+  const full = itemsFor(null);
+  const idx = Math.max(0, full.findIndex((x) => x.id === it.id));
+  const pos = { paper_id: S.paper.id, sentence: it.show, section: it.sec.title, item_id: it.id,
+                offset: finished ? 0 : Math.round((S.player.currentTime || 0) * 10) / 10,
+                done: finished ? full.length : idx, total: full.length };
+  S.position = pos;
+  const m = S.papers.find((x) => x.id === S.paper.id);
+  if (m) m.position = pos;
+  post("/api/position", pos).catch(() => {});
+}
+addEventListener("pagehide", () => {
+  if (!S.playing || !S.items.length) return;
+  const it = S.items[S.pos];
+  if (!it) return;
+  const full = itemsFor(null);
+  navigator.sendBeacon?.("/api/position", new Blob([JSON.stringify({ paper_id: S.paper.id, sentence: it.show, section: it.sec.title,
+    item_id: it.id, offset: S.player.currentTime || 0, done: Math.max(0, full.findIndex((x) => x.id === it.id)), total: full.length })],
+    { type: "application/json" }));
+});
+
+function renderResume() {
+  const pos = S.position;
+  const can = pos && pos.total && pos.done < pos.total && !S.playing;
+  $("playAll").textContent = can ? `▶ 続きから（${pos.section || ""}・${Math.round((pos.done / pos.total) * 100)}%）` : "▶ 全体を読む";
+  $("playAll").title = can ? `しおり: ${pos.sentence.slice(0, 80)}` : "最初から全体を読む";
+  $("playTop").hidden = !can;
+}
+
+function playAllOrResume(fromTop = false) {
+  if (!S.paper) return;
+  const items = itemsFor(null);
+  const pos = S.position;
+  if (fromTop || !pos || !pos.total || pos.done >= pos.total) return play(items);
+  const r = resumeIndex(items, pos);
+  play(items, r.index, { at: r.exact ? Math.max(0, r.at - 1) : 0 });   // 1秒手前から
+}
+
+// ---- 専門用語 ----
+function setTerms(gl) {
+  S.glossary = gl || { state: "none", terms: [] };
+  S.terms = new Set();
+  for (const t of S.glossary.terms || []) {
+    if (t.kind === "phrase") continue;
+    const k = t.term.toLowerCase();
+    S.terms.add(k);
+    if (t.kind === "word") { S.terms.add(k + "s"); if (k.endsWith("y")) S.terms.add(k.slice(0, -1) + "ies"); }
+    else S.terms.add(k + "s");                      // DMs
+  }
+}
+
+function renderTerms() {
+  const g = S.glossary || { terms: [] };
+  const terms = g.terms || [];
+  $("termsBtn").hidden = !terms.length && !["none", "running"].includes(g.state) && g.current !== false;
+  $("termsBtn").textContent = terms.length ? `用語（${terms.length}）` : "用語（作成中）";
+  const body = $("termsBody");
+  body.textContent = "";
+  if (!terms.length) { body.innerHTML = '<p class="muted">用語の一覧を作っています…</p>'; return; }
+  if (g.state === "no_translation") body.insertAdjacentHTML("beforeend", '<p class="muted">訳を作れなかったので、語の一覧だけです（あとで自動で作り直します）。</p>');
+  const groups = [["acronym", "略語"], ["word", "専門の語（辞書に無い・派生語でしか引けない）"], ["phrase", "よく出る句"]];
+  for (const [kind, name] of groups) {
+    const list = terms.filter((t) => t.kind === kind);
+    if (!list.length) continue;
+    const tbl = document.createElement("table");
+    tbl.className = "termtable";
+    tbl.innerHTML = `<thead><tr><th>${name}</th><th>訳</th><th class="n">回数</th><th></th></tr></thead><tbody></tbody>`;
+    for (const t of list) {
+      const tr = document.createElement("tr");
+      const reg = S.vocabSet?.has(t.term.toLowerCase());
+      tr.innerHTML = '<td><span class="tm"></span><div class="ex"></div></td><td class="ja"></td><td class="n"></td><td></td>';
+      tr.querySelector(".tm").textContent = t.term;
+      tr.querySelector(".tm").onclick = () => lookup(t.kind === "phrase" ? t.term.split(" ").pop() : t.term, { sec: t.section, sentence: t.sentence });
+      tr.querySelector(".ex").textContent = t.expansion || "";
+      tr.querySelector(".ex").title = t.sentence || "";
+      tr.querySelector(".ja").textContent = t.ja || "";
+      tr.querySelector(".n").textContent = t.count;
+      if (t.kind !== "phrase") {
+        const b = document.createElement("button");
+        b.className = "small";
+        b.textContent = reg ? "登録済み ✓" : "登録";
+        b.disabled = !!reg || !t.ja;
+        b.onclick = async () => { await register(t.term, { sec: t.section, sentence: t.sentence }).catch(() => {}); renderTerms(); };
+        tr.lastChild.appendChild(b);
+      }
+      tbl.tBodies[0].appendChild(tr);
+    }
+    body.appendChild(tbl);
+  }
+}
+
+function watchTerms() {
+  clearInterval(S.termPoll);
+  if (S.glossary?.current && S.glossary.state !== "none") return;
+  const id = S.paper.id;
+  let n = 0;
+  S.termPoll = setInterval(async () => {
+    if (!S.paper || S.paper.id !== id || ++n > 60) return clearInterval(S.termPoll);
+    const g = await api(`/api/papers/${id}/glossary`).catch(() => null);
+    if (!g || !g.current || g.state === "none") return;
+    clearInterval(S.termPoll);
+    setTerms(g);
+    renderTerms();
+    renderSections();                               // 本文の専門の語に点線を付ける
+  }, 2000);
+}
+
+// ---- 文の印（★）----
+function isMarked(t) { return (S.marks || []).some((m) => m.sentence === t); }
+
+function markButton(t, section) {
+  const b = document.createElement("button");
+  const on = isMarked(t);
+  b.className = "mk" + (on ? " on" : "");
+  b.textContent = on ? "★" : "☆";
+  b.title = on ? "印を外す" : "この文に印を付ける";
+  b.onclick = (e) => { e.stopPropagation(); toggleMark(t, section); };
+  return b;
+}
+
+async function toggleMark(t, section) {
+  if (!S.paper || !t) return;
+  const r = await post("/api/marks/toggle", { paper_id: S.paper.id, sentence: t, section });
+  S.marks = r.marks;
+  const m = S.papers.find((x) => x.id === S.paper.id);
+  if (m) m.marks = r.marks.length;
+  document.querySelectorAll("#sections li[data-t]").forEach((li) => {
+    if (li.dataset.t !== t) return;
+    li.classList.toggle("marked", !!r.mark);
+    li.querySelector(".mk").replaceWith(markButton(t, section));
+  });
+  if (S.playing && S.items[S.pos]?.show === t) { $("nowMark").classList.toggle("on", !!r.mark); $("nowMark").textContent = r.mark ? "★" : "☆"; }
+  renderMarks();
+}
+
+function renderMarks() {
+  const marks = S.marks || [];
+  $("marksBtn").hidden = !marks.length && $("marksPanel").hidden;
+  $("marksBtn").textContent = `★ 印（${marks.length}）`;
+  const ol = $("marksList");
+  ol.textContent = "";
+  const where = new Map();                         // 文 → [章, 訳, 読み上げの並びの位置]
+  const full = itemsFor(null);
+  S.paper.sections.forEach((sec) => sec.sentences.forEach((s, k) => {
+    if (!where.has(s.t)) where.set(s.t, [sec, S.paper.ja?.[`${sec.id}_${k + 1}`] || "", full.findIndex((x) => x.id === `${sec.id}_${k + 1}`)]);
+  }));
+  const order = (m) => (where.has(m.sentence) ? S.paper.sections.indexOf(where.get(m.sentence)[0]) * 1e4 + where.get(m.sentence)[2] : 1e9);
+  for (const m of [...marks].sort((a, b) => order(a) - order(b))) {
+    const [sec, ja, idx] = where.get(m.sentence) || [null, "", -1];
+    const li = document.createElement("li");
+    const w = document.createElement("div");
+    w.className = "where";
+    w.textContent = sec ? sec.title : `${m.section || ""}（今の文には見つからない）`;
+    const en = document.createElement("div");
+    en.className = "en";
+    en.textContent = m.sentence;
+    en.title = "この文から続けて再生";
+    en.onclick = () => { if (idx >= 0) play(full, idx); };
+    li.append(w, en);
+    if (ja) { const j = document.createElement("div"); j.className = "ja"; j.textContent = ja; li.appendChild(j); }
+    const note = document.createElement("textarea");
+    note.rows = 1;
+    note.placeholder = "メモ（申請書に使う観点など）";
+    note.value = m.note || "";
+    note.onchange = async () => { const r = await post(`/api/marks/${m.uid}/note`, { note: note.value }).catch(() => null); if (r) m.note = r.note; };
+    const del = document.createElement("button");
+    del.className = "small";
+    del.textContent = "印を外す";
+    del.onclick = () => toggleMark(m.sentence, m.section);
+    li.append(note, del);
+    ol.appendChild(li);
+  }
+  if (!marks.length) ol.innerHTML = '<li class="muted">まだ印はありません。</li>';
+}
+
+async function marksMarkdown() {
+  const q = $("marksAll").checked ? "" : `?paper=${S.paper.id}`;
+  const r = await fetch(`/api/marks/export${q}`);
+  if (!r.ok) throw new Error(r.statusText);
+  return r.text();
+}
+
+// 図の一覧に無い参照は、押せない見た目にする
+function markRefs(root = document) {
+  root.querySelectorAll("a.fr").forEach((a) => a.classList.toggle("missing", !S.figKeys?.has(a.dataset.key)));
 }
 
 // ---- 章の編集（見出しの段・分ける・つなぐ・名前）----
@@ -398,6 +607,8 @@ async function editSections(body) {
   const keep = S.openSecs;
   S.paper = p;
   S.audio = p.audio;
+  setTerms(p.glossary);
+  watchTerms();
   S.openSecs = keep;
   const m = S.papers.find((x) => x.id === p.id);
   if (m) { m.sections = p.sections.length; m.sentences = p.sections.reduce((n, s) => n + s.sentences.length, 0); }
@@ -515,16 +726,17 @@ function sentenceItem(sec, k) {
 }
 
 // ---- 読み上げ ----
-function play(items, start = 0) {
+function play(items, start = 0, opts = {}) {
   stop();
   if (!items.length) return;
   S.items = items;
-  S.pos = start;
+  S.pos = Math.min(start, items.length - 1);
   S.playing = true;
   S.paused = false;
   buildTimeline();
   $("progRow").hidden = false;
-  speakCurrent();
+  renderResume();
+  speakCurrent(opts.at ? { at: opts.at } : {});
 }
 
 // ---- プログレスバー（今の再生範囲の全体。動かすとその位置へ）----
@@ -589,7 +801,7 @@ function advance(g) {
 function speakCurrent(opts = {}) {
   const g = ++S.gen;
   haltOutput();
-  if (S.pos >= S.items.length) { S.playing = false; status("読み終わりました"); $("nowText").hidden = true; return; }
+  if (S.pos >= S.items.length) { S.playing = false; status("読み終わりました"); $("nowRow").hidden = true; savePosition(true, true); return; }
   const it = S.items[S.pos];
   showProgress();
   if (S.audio?.state === "done") {
@@ -623,6 +835,7 @@ function pauseResume() {
     else speakCurrent();                          // ブラウザ読み上げはその文の頭から
   } else {
     S.paused = true;
+    savePosition(true);
     if (S.audio?.state === "done") S.player.pause();
     else { S.gen++; speechSynthesis.cancel(); }
     showProgress();
@@ -657,6 +870,7 @@ function step(d) {
 }
 
 function stop() {
+  savePosition(true);
   S.gen++;
   S.playing = false;
   S.paused = false;
@@ -664,8 +878,9 @@ function stop() {
   haltOutput();
   status("停止中");
   $("pause").textContent = "⏸";
-  $("nowText").hidden = true;
+  $("nowRow").hidden = true;
   $("progRow").hidden = true;
+  renderResume();
 }
 
 function showProgress() {
@@ -674,9 +889,24 @@ function showProgress() {
   status(`${S.paused ? "一時停止中 — " : ""}${it.sec.title} ・ ${where}（全体 ${S.pos + 1} / ${S.items.length}）`);
   $("pause").textContent = S.paused ? "▶" : "⏸";
   const now = $("nowText");
-  now.hidden = false;
+  $("nowRow").hidden = false;
   now.dataset.sec = it.sec.id;
+  now.dataset.t = it.heading ? "" : it.show;
   fillWords(now, it.show);
+  markRefs(now);
+  $("nowMark").hidden = !!it.heading;
+  $("nowMark").classList.toggle("on", !it.heading && isMarked(it.show));
+  $("nowMark").textContent = !it.heading && isMarked(it.show) ? "★" : "☆";
+  const fk = it.heading ? [] : refKeys(it.show).filter((k) => S.figKeys?.has(k));
+  const img = $("nowFig");                          // この文が指す図を横に出す
+  img.hidden = !fk.length;
+  if (fk.length) {
+    const f = S.figures[S.figKeys.get(fk[0])];
+    if (img.dataset.src !== f.url) { img.src = f.url; img.dataset.src = f.url; }
+    img.alt = img.title = `${f.label}（押すと大きく開く）`;
+    img.onclick = () => openLightbox(S.figKeys.get(fk[0]));
+  }
+  savePosition(S.paused);
 }
 
 function status(t) { $("status").textContent = t; }
@@ -733,10 +963,83 @@ function showWord(r, ctx = {}) {
     S.wordAudio.src = `/api/word_audio?w=${encodeURIComponent(r.found ? r.headword : r.normalized)}`;
     S.wordAudio.play().catch(() => {});
   };
+  showReading(r.query);
 }
+
+// ---- 読み方の辞書 ----
+async function loadPron() { S.pron = (await api("/api/pronounce")).rules; return S.pron; }
+
+async function showReading(word) {
+  const rules = S.pron || await loadPron().catch(() => []);
+  const hit = rules.find((x) => (x.case ? x.from === word : x.from.toLowerCase() === word.toLowerCase()));
+  $("wcRead").textContent = hit ? `読み方: 「${hit.to}」` : "";
+  $("wcReadEdit").textContent = hit ? "読み方を変える" : "読み方を直す";
+  $("wcReadEdit").onclick = async () => {
+    const to = prompt(`「${word}」を読み上げでどう読むか（空にすると辞書から消す）。例: DM → D M、ALPAO → al pao`, hit ? hit.to : word);
+    if (to === null) return;
+    const rest = rules.filter((x) => x !== hit);
+    await savePron(to.trim() ? [...rest, { from: word, to: to.trim(), case: /[A-Z]/.test(word) }] : rest);
+    showReading(word);
+    const pv = await post("/api/pronounce/preview", { text: word }).catch(() => null);
+    if (pv) { S.wordAudio.src = pv.url; S.wordAudio.play().catch(() => {}); }
+  };
+}
+
+async function savePron(rules) {
+  S.pron = (await post("/api/pronounce", { rules })).rules;
+  if (S.paper) {                                   // 変わった文だけ作り直しが始まる
+    const p = await api(`/api/papers/${S.paper.id}`).catch(() => null);
+    if (p && S.paper?.id === p.id) { S.audio = p.audio; renderAudio(); watchAudio(); }
+  }
+  return S.pron;
+}
+
+function pronRow(r = { from: "", to: "", case: true }) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = '<td><input type="text" class="pf" spellcheck="false"></td><td><input type="text" class="pt" spellcheck="false"></td>'
+    + '<td><input type="checkbox" class="pc"></td><td><button class="small ps" title="試聴">🔈</button> <button class="small px" title="消す">✕</button></td>';
+  tr.querySelector(".pf").value = r.from;
+  tr.querySelector(".pt").value = r.to;
+  tr.querySelector(".pc").checked = !!r.case;
+  tr.querySelector(".px").onclick = () => tr.remove();
+  tr.querySelector(".ps").onclick = () => tryPron(tr.querySelector(".pt").value);
+  return tr;
+}
+function pronFromRows() {
+  return [...document.querySelectorAll("#pronRows tr")].map((tr) => ({ from: tr.querySelector(".pf").value.trim(),
+    to: tr.querySelector(".pt").value.trim(), case: tr.querySelector(".pc").checked })).filter((r) => r.from && r.to);
+}
+async function tryPron(text) {
+  if (!text.trim()) return;
+  $("pronSpoken").textContent = "試聴の音声を作っています…";
+  const pv = await post("/api/pronounce/preview", { text }).catch((e) => ({ error: e.message }));
+  $("pronSpoken").textContent = pv.error ? pv.error : `読み: ${pv.spoken}`;
+  if (pv.url) { S.wordAudio.src = pv.url; S.wordAudio.play().catch(() => {}); }
+}
+$("pronBtn").onclick = async () => {
+  const rows = $("pronRows");
+  rows.textContent = "";
+  for (const r of await loadPron()) rows.appendChild(pronRow(r));
+  if (!rows.children.length) rows.appendChild(pronRow());
+  $("pronMsg").textContent = "";
+  $("pronDlg").showModal();
+};
+$("pronAdd").onclick = () => $("pronRows").appendChild(pronRow());
+$("pronClose").onclick = () => $("pronDlg").close();
+$("pronTryBtn").onclick = async () => {
+  // 保存前の行でも試せるよう、一度保存してから試聴する
+  await savePron(pronFromRows());
+  tryPron($("pronTry").value);
+};
+$("pronSave").onclick = async () => {
+  const saved = await savePron(pronFromRows());
+  $("pronMsg").textContent = `保存しました（${saved.length} 件）。変わった文の音声を作り直します`;
+};
 
 async function loadVocab() {
   const vs = await api("/api/vocab");
+  S.vocabSet = new Set(vs.map((v) => v.headword.toLowerCase()));
+  if (S.paper && !$("termsPanel").hidden) renderTerms();
   const ul = $("vocabList");
   ul.innerHTML = "";
   $("vocabEmpty").hidden = vs.length > 0;
@@ -763,6 +1066,8 @@ async function loadVocab() {
 }
 
 document.addEventListener("click", (e) => {
+  const fr = e.target.closest("a.fr");
+  if (fr) { e.preventDefault(); if (S.figKeys?.has(fr.dataset.key)) openLightbox(S.figKeys.get(fr.dataset.key)); return; }
   const w = e.target.closest(".w");
   if (!w) return;
   document.querySelectorAll(".w.hit").forEach((x) => x.classList.remove("hit"));
@@ -962,7 +1267,24 @@ $("progressInput").onchange = async (e) => {
 };
 
 // ---- つなぎこみ ----
-$("playAll").onclick = () => S.paper && play(itemsFor(null));
+$("playAll").onclick = () => playAllOrResume();
+$("playTop").onclick = () => playAllOrResume(true);
+$("nowMark").onclick = () => { const it = S.items[S.pos]; if (it && !it.heading) toggleMark(it.show, it.sec.title); };
+$("marksBtn").onclick = () => { $("marksPanel").hidden = !$("marksPanel").hidden; };
+$("termsBtn").onclick = () => { $("termsPanel").hidden = !$("termsPanel").hidden; if (!$("termsPanel").hidden) renderTerms(); };
+$("marksCopy").onclick = async () => {
+  try { await navigator.clipboard.writeText(await marksMarkdown()); $("marksMsg").textContent = "コピーしました"; }
+  catch (e) { $("marksMsg").textContent = `コピーできませんでした: ${e.message}`; }
+};
+$("marksSave").onclick = async () => {
+  const text = await marksMarkdown();
+  const a = document.createElement("a");
+  const d = new Date(), z = (n) => String(n).padStart(2, "0");
+  a.href = URL.createObjectURL(new Blob([text], { type: "text/markdown" }));
+  a.download = `marks_${$("marksAll").checked ? "all" : S.paper.id}_${d.getFullYear() % 100}${z(d.getMonth() + 1)}${z(d.getDate())}.md`;
+  a.click();
+  $("marksMsg").textContent = `保存しました（${a.download}）`;
+};
 $("pause").onclick = pauseResume;
 $("stop").onclick = stop;
 $("prev").onclick = () => step(-1);
@@ -1018,6 +1340,7 @@ document.addEventListener("keydown", (e) => {
   if (e.code === "Space" && e.target.tagName !== "BUTTON") { e.preventDefault(); pauseResume(); }
   if (e.key === "ArrowLeft") { e.preventDefault(); seekBy(e.shiftKey ? -10 : -5); }
   if (e.key === "ArrowRight") { e.preventDefault(); seekBy(e.shiftKey ? 10 : 5); }
+  if ((e.key === "m" || e.key === "M") && S.playing && !e.metaKey && !e.ctrlKey) { e.preventDefault(); $("nowMark").click(); }
 });
 let dragDepth = 0;
 addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; $("drop").hidden = false; });
