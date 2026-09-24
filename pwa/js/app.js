@@ -5,7 +5,7 @@ import { lookup } from "./lookup.js";
 import * as srs from "./srs.js";
 import { unzipStored, text } from "./zip.js";
 
-const VERSION = "6";
+const VERSION = "7";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
@@ -73,6 +73,7 @@ async function openPaper(id) {
   $("paperPick").hidden = true;
   $("paperView").hidden = false;
   $("paperTitle").textContent = p.meta.title;
+  renderFigures(p);
   const ol = $("sections");
   ol.innerHTML = "";
   for (const sec of p.paper.sections) {
@@ -122,6 +123,65 @@ async function openPaper(id) {
     ol.appendChild(li);
   }
 }
+// ---- 図・表・数式（画像として開く）----
+const figUrls = [];
+async function renderFigures(p) {
+  figUrls.splice(0).forEach((u) => URL.revokeObjectURL(u));
+  const figs = p.figures || [];
+  $("figBtn").hidden = !figs.length;
+  $("figBtn").textContent = `図・表・数式（${figs.length}）`;
+  $("figPanel").hidden = true;
+  const grid = $("figGrid");
+  grid.textContent = "";
+  S.figs = [];
+  for (const [i, f] of figs.entries()) {
+    const blob = await db.get("figures", `${p.id}/${f.file}`);
+    if (!blob) continue;
+    const url = URL.createObjectURL(blob);
+    figUrls.push(url);
+    S.figs.push({ ...f, url });
+    const fig = document.createElement("figure");
+    const img = document.createElement("img");
+    img.src = url;
+    img.loading = "lazy";
+    img.alt = f.label || f.file;
+    const cap = document.createElement("figcaption");
+    cap.textContent = `${f.label || "画像"} ・ p.${f.page}`;
+    fig.append(img, cap);
+    const k = S.figs.length - 1;
+    fig.onclick = () => openLightbox(k);
+    grid.appendChild(fig);
+  }
+  $("figBtn").hidden = !S.figs.length;
+  $("figBtn").textContent = `図・表・数式（${S.figs.length}）`;
+}
+$("figBtn").onclick = () => { $("figPanel").hidden = !$("figPanel").hidden; };
+function openLightbox(i) {
+  const n = S.figs.length;
+  if (!n) return;
+  S.lb = (i + n) % n;
+  const f = S.figs[S.lb];
+  $("lbImg").src = f.url;
+  $("lbLabel").textContent = f.label || "画像";
+  $("lbCount").textContent = `${S.lb + 1} / ${n} ・ p.${f.page}`;
+  $("lbCaption").textContent = f.caption || "";
+  $("lbOpen").href = f.url;
+  $("lbOpen").download = f.file;
+  $("lightbox").hidden = false;
+}
+$("lbPrev").onclick = () => openLightbox(S.lb - 1);
+$("lbNext").onclick = () => openLightbox(S.lb + 1);
+$("lbClose").onclick = () => { $("lightbox").hidden = true; };
+// 左右にはらって前後の図へ
+let touchX = null;
+$("lightbox").addEventListener("touchstart", (e) => { touchX = e.touches[0].clientX; }, { passive: true });
+$("lightbox").addEventListener("touchend", (e) => {
+  if (touchX === null) return;
+  const dx = e.changedTouches[0].clientX - touchX;
+  touchX = null;
+  if (Math.abs(dx) > 50) openLightbox(S.lb + (dx < 0 ? 1 : -1));
+});
+
 $("backToList").onclick = () => { $("paperPick").hidden = false; $("paperView").hidden = true; };
 
 // ---- 読み上げ（1文ずつの m4a を順に鳴らす）----
@@ -491,7 +551,13 @@ async function importBundle(file) {
     const ja = tr ? JSON.parse(text(tr)).items || {} : {};          // 文ごとの日本語訳（Mac で作ったもの）
     const du = files.get(`papers/${pid}/durations.json`);
     const durations = du ? JSON.parse(text(du)) : null;              // 各文の音声の長さ（プログレスバー用）
-    const entries = [["papers", pid, { id: pid, meta, paper, ja, durations }]];
+    const fj = files.get(`papers/${pid}/figures.json`);
+    const figs = fj ? (JSON.parse(text(fj)).items || []) : [];             // 図・表・数式の一覧
+    const entries = [["papers", pid, { id: pid, meta, paper, ja, durations, figures: figs }]];
+    for (const it of figs) {
+      const bytes = files.get(`papers/${pid}/figures/${it.file}`);
+      if (bytes) entries.push(["figures", `${pid}/${it.file}`, new Blob([bytes], { type: "image/png" })]);
+    }
     for (const [name, bytes] of files) {
       const m = name.match(/^papers\/([0-9a-f]{8})\/audio\/([A-Za-z0-9_]+)\.m4a$/);
       if (m && m[1] === pid) { entries.push(["audio", `${pid}/${m[2]}`, new Blob([bytes], { type: "audio/mp4" })]); nAudio++; }
@@ -547,9 +613,9 @@ async function exportProgress() {
 $("exportBtn").onclick = async () => { $("exportMsg").textContent = await exportProgress(); loadStats(); };
 
 async function loadStats() {
-  const [papers, audioKeys, words, reviews, lookups] = await Promise.all(
-    [db.keys("papers"), db.keys("audio"), db.keys("words"), db.all("reviews"), db.keys("lookups")]);
-  const li = [`論文 ${papers.length} 本（音声 ${audioKeys.length} 本）`, `単語帳 ${words.length} 語`,
+  const [papers, audioKeys, figKeys, words, reviews, lookups] = await Promise.all(
+    [db.keys("papers"), db.keys("audio"), db.keys("figures"), db.keys("words"), db.all("reviews"), db.keys("lookups")]);
+  const li = [`論文 ${papers.length} 本（音声 ${audioKeys.length} 本・図 ${figKeys.length} 枚）`, `単語帳 ${words.length} 語`,
               `答えの記録 ${reviews.length} 件（このスマホで ${reviews.filter((r) => r.device === S.device).length} 件）`,
               `このスマホで引いた記録 ${lookups.length} 件`];
   const imp = await kv("last_import"), exp = await kv("last_export");

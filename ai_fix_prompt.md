@@ -4,12 +4,13 @@ PDF から自動で取り出した「章と文」（sentences.json）に誤り�
 ## フォルダの中身
 - original.pdf … 元の論文。見るだけで変更しない
 - sentences.json … 自動で取り出した章と文。**これを直す**
+- figures.json、figures/ … 図・表・数式の画像と一覧。自動では PDF に埋め込まれた画像だけを切り抜いてある。**これも直す**（下の「図・表・数式」）
 - meta.json、audio/、export/、translation.json … 触らない（app が作り直す。訳もこちらで作り直すので直さない）
 
 ## 手順
-1. 最初に sentences.json を sentences.orig.json にコピーして残す（sentences.orig.json が既にあれば上書きしない）
+1. 最初に sentences.json を sentences.orig.json に、figures.json を figures.orig.json にコピーして残す（既にあれば上書きしない）
 2. original.pdf を全ページ読み、sentences.json と突き合わせる。文字が選べない（画像だけの）ページは OCR で読む（`tesseract` が使えれば使い、無ければ画像として読む）
-3. 下の「直す観点」のとおりに直して、sentences.json に書き戻す
+3. 下の「直す観点」と「図・表・数式」のとおりに直して、sentences.json と figures.json に書き戻す
 4. 確認のコマンドを実行し、エラーが無くなるまで直す（警告は、PDF どおりなら残してよい）:
    {check}
 5. 最後に、直した内容を箇条書きで報告する（章の数・文の数の前後、直した種類ごとの件数と例）
@@ -23,6 +24,31 @@ PDF から自動で取り出した「章と文」（sentences.json）に誤り�
 6. **抜けを補う**: PDF にあるのに抜けている本文（取り出し漏れ・画像だけのページ）は補う。段組みの読む順番が入れ替わっていたら直す
 7. **数式**: 画面に出す t は PDF の見た目に近い形で残してよい。読み上げる s では、式を "(equation)" に置き換え、文字化け（ð, Þ, 1⁄4, � など）を s に残さない
 8. **読み上げる文 s**: t から、年を含む括弧の引用（Smith et al., 2020）と [12] 型の引用を除いたもの（式は 7 のとおり）。s を空文字 "" にすると、その文は読み上げない（表の切れ端などに使う）
+
+## 図・表・数式
+自動の抜き出しは、PDF に埋め込まれた画像の範囲だけ。線で描かれたグラフ・表・数式は抜けていることがある。PDF の全ページを見て、次のとおり直す。
+
+1. **抜けを足す**: 図（Fig.）・表（Table）・独立した行の数式（番号付きの式）で、figures.json に無いものを足す。PDF のその範囲を画像にして figures/ に保存する。画像にするには次のように書く（範囲はポイント単位。キャプションは含めず、図・表・式の本体だけを囲む）:
+   ```
+   {python} -c "import pymupdf; d=pymupdf.open('{folder}/original.pdf'); p=d[<ページ番号-1>]; p.get_pixmap(clip=pymupdf.Rect(<x0>,<y0>,<x1>,<y1>), dpi=200).save('{folder}/figures/<名前>.png')"
+   ```
+   名前は英数字・_・- だけ（例 `fig01.png`、`table1.png`、`eq03.png`）。
+2. **範囲を直す**: 自動の切り抜きが図の一部しか入っていない・余計なものまで入っているときは、上の方法で切り抜き直す（`auto_` で始まる元の画像は消してよい）。
+3. **種類と番号**: kind は figure / table / equation。label は PDF の表記に合わせて "Fig. 1" / "Table 2" / "Eq. (3)"。caption には PDF のキャプションの全文（数式ならその式を指す一文）。
+4. **外す**: ロゴ・雑誌のマーク・著者の顔写真など、図・表・数式でない画像は figures.json から外す（画像ファイルも消してよい）。
+5. **順番**: items は PDF に出てくる順（ページ順、同じページなら上から）。
+
+## figures.json の形（守ること）
+```json
+{
+  "version": 1,
+  "manual": {"by": "ai", "at": "<作業した今の日時>", "notes": "<直した内容の要約>"},
+  "items": [
+    {"file": "fig01.png", "kind": "figure", "label": "Fig. 1", "caption": "Fig. 1. キャプションの全文", "page": 2, "by": "ai"}
+  ]
+}
+```
+- 最上位の **"manual" を必ず付ける**（無いと自動の抜き出しで上書きされる）。自動のまま残す項目は "by": "auto" のままでよい
 
 ## sentences.json の形（守ること）
 ```json
@@ -40,4 +66,4 @@ PDF から自動で取り出した「章と文」（sentences.json）に誤り�
 - 上の title / manual / sections / level / kind / sentences / t / s 以外のキー（id, number, speech_title, page, extractor_version など）は残しても消してもよい（app が付け直す）
 - UTF-8 の正しい JSON にする
 
-app は次にこの論文を開いたとき、文が変わったことを見つけて、音声と訳を作り直します。
+app は次にこの論文を開いたとき、文が変わったことを見つけて音声と訳を作り直し、図・表・数式は figures.json のとおりに表示します。

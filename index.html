@@ -115,8 +115,13 @@
     <section id="paper" hidden>
       <h2 id="paperTitle"></h2>
       <p id="paperMeta" class="muted"></p>
-      <p class="audioline"><button id="aiBtn" class="small">AI に手直しを頼む（プロンプトをコピー）</button>
+      <p class="audioline"><button id="figBtn" class="small" hidden>図・表・数式</button>
+        <button id="aiBtn" class="small">AI に手直しを頼む（プロンプトをコピー）</button>
         <span id="manualTag" class="muted"></span></p>
+      <div id="figPanel" class="figpanel" hidden>
+        <p class="muted">押すと大きく開きます。線で描かれた図・表・数式が抜けている、番号が違うときは「AI に手直しを頼む」で直せます。</p>
+        <div id="figGrid" class="figgrid"></div>
+      </div>
       <div id="aiPanel" class="aipanel" hidden>
         <p class="muted">章分け・単語の区切り・文の切れ目・OCR などがうまくいかなかったとき、下の文を Claude Code などファイルを読み書きできる AI に貼ると、
           元の PDF を見ながら <code>sentences.json</code> を直します（直す前は <code>sentences.orig.json</code> に残ります）。
@@ -169,6 +174,16 @@
   <button id="wcRegister" class="primary wide-sm" hidden>単語帳に登録</button>
   <div class="wc-foot muted"><span id="wcSource"></span> <a id="wcWeblio" target="_blank" rel="noopener">Weblio で見る ↗</a></div>
 </aside>
+
+<div id="lightbox" class="lightbox" hidden>
+  <div class="lb-bar"><b id="lbLabel"></b> <span id="lbCount" class="muted"></span>
+    <a id="lbOpen" target="_blank" rel="noopener" class="btn small">画像を新しいタブで開く ↗</a>
+    <button id="lbClose" class="small">閉じる（Esc）</button></div>
+  <button id="lbPrev" class="lb-nav prev" title="前（←）">‹</button>
+  <img id="lbImg" alt="">
+  <button id="lbNext" class="lb-nav next" title="次（→）">›</button>
+  <p id="lbCaption" class="lb-cap"></p>
+</div>
 
 <div id="drop" class="drop" hidden>ここに PDF を落とすと取り込みます</div>
 <script src="assets/app.js"></script>

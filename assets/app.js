@@ -126,8 +126,56 @@ async function openPaper(id) {
   renderTranslation();
   watchTranslation();
   $("aiPanel").hidden = true;
+  loadFigures();
   $("manualTag").textContent = p.manual ? `AI 手直し済み（${(p.manual.at || "").slice(0, 16).replace("T", " ")}）${p.manual.notes ? `: ${p.manual.notes}` : ""}` : "";
 }
+
+// ---- 図・表・数式（画像として開く）----
+async function loadFigures() {
+  const id = S.paper.id;
+  $("figPanel").hidden = true;
+  $("figBtn").hidden = true;
+  const st = await api(`/api/papers/${id}/figures`).catch(() => ({ items: [] }));
+  if (!S.paper || S.paper.id !== id) return;
+  S.figures = (st.items || []).map((it) => ({ ...it, url: `/api/papers/${id}/figures/${it.file}` }));
+  const n = S.figures.length;
+  $("figBtn").hidden = !n;
+  $("figBtn").textContent = `図・表・数式（${n}）${st.manual ? " ・AI 手直し済み" : ""}`;
+  const grid = $("figGrid");
+  grid.textContent = "";
+  S.figures.forEach((f, i) => {
+    const fig = document.createElement("figure");
+    const img = document.createElement("img");
+    img.loading = "lazy";
+    img.src = f.url;
+    img.alt = f.label || f.file;
+    const cap = document.createElement("figcaption");
+    cap.textContent = `${f.label || { image: "画像", figure: "図", table: "表", equation: "数式" }[f.kind] || "画像"} ・ p.${f.page}`;
+    fig.append(img, cap);
+    fig.onclick = () => openLightbox(i);
+    grid.appendChild(fig);
+  });
+}
+$("figBtn").onclick = () => { $("figPanel").hidden = !$("figPanel").hidden; };
+
+function openLightbox(i) {
+  const n = S.figures.length;
+  if (!n) return;
+  S.lbIndex = (i + n) % n;
+  const f = S.figures[S.lbIndex];
+  $("lbImg").src = f.url;
+  $("lbImg").alt = f.label || f.file;
+  $("lbLabel").textContent = f.label || "画像";
+  $("lbCount").textContent = `${S.lbIndex + 1} / ${n} ・ p.${f.page}${f.by === "ai" ? " ・ AI" : ""}`;
+  $("lbCaption").textContent = f.caption || "";
+  $("lbOpen").href = f.url;
+  $("lightbox").hidden = false;
+}
+function closeLightbox() { $("lightbox").hidden = true; }
+$("lbPrev").onclick = () => openLightbox(S.lbIndex - 1);
+$("lbNext").onclick = () => openLightbox(S.lbIndex + 1);
+$("lbClose").onclick = closeLightbox;
+$("lightbox").addEventListener("click", (e) => { if (e.target.id === "lightbox") closeLightbox(); });
 
 // ---- AI に手直しを頼むプロンプト（フォルダの場所 ＋ 決まった依頼文）----
 $("aiBtn").onclick = async () => {
@@ -844,6 +892,13 @@ $("searchForm").onsubmit = (e) => {
 $("wordClose").onclick = () => { $("wordCard").hidden = true; };
 document.addEventListener("keydown", (e) => {
   if (/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+  if (!$("lightbox").hidden) {                     // 図を開いている間は ← → Esc を図の操作に使う
+    if (e.key === "Escape") closeLightbox();
+    else if (e.key === "ArrowLeft") openLightbox(S.lbIndex - 1);
+    else if (e.key === "ArrowRight") openLightbox(S.lbIndex + 1);
+    e.preventDefault();
+    return;
+  }
   if (e.key === "Escape") { $("wordCard").hidden = true; return; }
   if (S.view === "review") return reviewKey(e);
   if (e.code === "Space" && e.target.tagName !== "BUTTON") { e.preventDefault(); pauseResume(); }

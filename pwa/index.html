@@ -27,6 +27,8 @@
       <p class="row"><button id="playAll" class="primary">▶ 全体を読む</button>
         <label class="muted"><input type="checkbox" id="skipBack" checked> 後付けを飛ばす</label>
         <label class="muted"><input type="checkbox" id="showJa" checked> 訳</label></p>
+      <p><button id="figBtn" class="btn" hidden>図・表・数式</button></p>
+      <div id="figPanel" hidden><div id="figGrid" class="figgrid"></div></div>
       <ol id="sections" class="sections"></ol>
     </div>
   </section>
@@ -106,6 +108,7 @@
       <li>−10 / −5 / +5 / +10 で秒単位に戻す・進める（文をまたいでも続きます）、⏮ ⏭ で前後の文、右で速さ。</li>
       <li>画面を消しても続きます。ロック画面や通知から一時停止・次の文へ進めます。</li>
       <li>Mac で作った日本語訳があれば、各文の下に出ます（「訳」で表示・非表示）。</li>
+      <li>論文の上の「<b>図・表・数式</b>」で一覧が出ます。押すと大きく開き、左右にはらうと前後の図。「画像を開く・保存」で画像そのものを開けます。</li>
       <li>文の中の単語をタップすると辞書が出ます。覚えたい単語は「<b>単語帳に登録</b>」を押すと単語帳に入り、復習に出ます。</li>
     </ul>
     <h3>4. 復習する</h3>
@@ -150,6 +153,17 @@
     <label class="speed"><input type="range" id="speed" min="0.7" max="2" step="0.05" value="1"><span id="speedVal">1.00×</span></label>
   </div>
   <p id="status" class="muted small"></p>
+</div>
+
+<!-- 図を大きく開く -->
+<div id="lightbox" class="lightbox" hidden>
+  <div class="lb-bar"><b id="lbLabel"></b> <span id="lbCount"></span>
+    <button id="lbClose" class="icon close">×</button></div>
+  <img id="lbImg" alt="">
+  <p id="lbCaption" class="lb-cap"></p>
+  <div class="lb-row"><button id="lbPrev" class="btn">‹ 前</button>
+    <a id="lbOpen" class="btn" target="_blank" rel="noopener">画像を開く・保存</a>
+    <button id="lbNext" class="btn">次 ›</button></div>
 </div>
 
 <!-- 辞書 -->

@@ -7,6 +7,8 @@ Mac → スマホ: paper_reader_<日時>.zip（ZIP。すべて無圧縮で格納
   papers/<id>/sentences.json         章と文
   papers/<id>/translation.json       文ごとの日本語訳（作ってあれば）
   papers/<id>/durations.json         各文の音声の長さ（秒）。プログレスバー用
+  papers/<id>/figures.json           図・表・数式の一覧
+  papers/<id>/figures/<file>.png     図・表・数式の画像
   papers/<id>/audio/<item>.m4a       1文ずつの音声（章ごとの1本ものは入れない。スマホでも1文ずつ鳴らす）
 
 スマホ → Mac: paper_reader_progress_<日時>.json
@@ -42,6 +44,13 @@ def make_bundle(store, vocab, paper_ids: list[str], out_dir: Path) -> Path:
                        compress_type=zipfile.ZIP_STORED)
             z.writestr(f"papers/{pid}/sentences.json", json.dumps(paper, ensure_ascii=False),
                        compress_type=zipfile.ZIP_STORED)
+            if (d / "figures.json").exists():
+                figs = json.loads((d / "figures.json").read_text(encoding="utf-8"))
+                z.writestr(f"papers/{pid}/figures.json", json.dumps(figs, ensure_ascii=False), compress_type=zipfile.ZIP_STORED)
+                for it in figs.get("items", []):
+                    f = d / "figures" / str(it.get("file", ""))
+                    if f.is_file() and f.suffix == ".png":
+                        z.write(f, f"papers/{pid}/figures/{f.name}", compress_type=zipfile.ZIP_STORED)
             if (d / "translation.json").exists():
                 z.write(d / "translation.json", f"papers/{pid}/translation.json", compress_type=zipfile.ZIP_STORED)
             st = audio.ensure_durations(d, paper)

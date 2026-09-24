@@ -12,6 +12,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
+import figures  # noqa: E402
 from store import normalize  # noqa: E402
 
 GARBLED = re.compile(r"[ðÞ�]|1⁄4|1⁄2")
@@ -65,6 +66,16 @@ def check(folder: Path) -> int:
                 warns.append(f"{where}: 読み上げる文 s に引用が残っている")
             if re.match(r"^(Fig\.|Figure|Table)\s*\d+[.:|]", t):
                 warns.append(f"{where}: 図表の説明が混ざっている？ {t[:40]!r}")
+    ferrs, fwarns = figures.check(folder)
+    fst = figures.status(folder)
+    print(f"図・表・数式 {len(fst.get('items', []))} 件" + ("（AI 手直し済み）" if fst.get("manual") else "（自動のまま。manual が無い）"))
+    for it in fst.get("items", []):
+        print(f"  p.{it.get('page')} [{it.get('kind')}] {it.get('label') or '-'}  {it.get('file')}")
+    for e in ferrs:
+        print("エラー:", e)
+    warns += fwarns
+    if ferrs:
+        return 1
     for w in warns[:80]:
         print("警告:", w)
     if len(warns) > 80:

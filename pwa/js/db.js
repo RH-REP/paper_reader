@@ -1,18 +1,19 @@
 // スマホ内の保存（IndexedDB）。サーバーには何も送らない。
 //   papers   id → {id, meta, paper}           論文（章と文）
 //   audio    "<id>/<音声id>" → Blob            1文ずつの音声（m4a）
+//   figures  "<id>/<file>" → Blob              図・表・数式の画像（png）。一覧は papers の figures
 //   words    headword → {headword, meaning, source, first_seen, examples[], origin}
 //   reviews  uid → {uid, headword, rating, reviewed_at, device}   答えの記録（Mac のものも含む）
 //   lookups  uid → スマホで引いた記録（Mac に戻す）
 //   kv       設定など（device, last_export_at, ...）
 const NAME = "paper_reader";
-const STORES = ["papers", "audio", "words", "reviews", "lookups", "kv"];
+const STORES = ["papers", "audio", "figures", "words", "reviews", "lookups", "kv"];
 let dbp = null;
 
 function open() {
   if (dbp) return dbp;
   dbp = new Promise((resolve, reject) => {
-    const req = indexedDB.open(NAME, 1);
+    const req = indexedDB.open(NAME, 2);           // 2: figures を足した（前からある保存はそのまま）
     req.onupgradeneeded = () => {
       const db = req.result;
       for (const s of STORES) if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);

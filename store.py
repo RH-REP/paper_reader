@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 import extract
+import figures
 
 
 def _sha256(path: Path) -> str:
@@ -121,6 +122,10 @@ class Store:
         paper = extract.extract_file(d / "original.pdf", on_page)
         paper["id"] = meta["id"]
         _write_json(d / "sentences.json", paper)
+        try:
+            figures.extract(d, force=True)              # 図・表の画像（手直し済みの figures.json は触らない）
+        except Exception as e:  # 画像が壊れているなど。文の取り出しは続ける
+            print(f"図を取り出せなかった: {e}")
         meta.update({
             "title": paper["title"] or Path(meta["source_name"]).stem,
             "pages": paper["pages"], "ocr_pages": paper["ocr_pages"],

@@ -14,6 +14,8 @@
   POST /api/papers/<id>/audio           音声を今の声・速さで作り直す
   POST /api/papers/<id>/translate       文ごとの日本語訳を作り直す（macOS 内蔵の翻訳。端末内）
   GET  /api/papers/<id>/ai_prompt       AI に手直しを頼むプロンプト（フォルダの場所 ＋ ai_fix_prompt.md）
+  GET  /api/papers/<id>/figures         図・表・数式の一覧（figures.json）
+  GET  /api/papers/<id>/figures/<file>.png  図・表・数式の画像
   POST /api/papers/<id>/reveal          持ち出し用の音声フォルダ（export/）を Finder で開く
   GET  /api/papers/<id>/audio/<item>.m4a    1文ずつの音声
   GET  /api/papers/<id>/export/<file>.m4a   章ごとの音声
@@ -54,6 +56,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import audio  # noqa: E402
 import bundle  # noqa: E402
+import figures  # noqa: E402
 import translate  # noqa: E402
 from lookup import Dictionary  # noqa: E402
 from share import ShareServer  # noqa: E402
@@ -266,6 +269,19 @@ class Handler(SimpleHTTPRequestHandler):
             tr = translate.status(d)
             return self._json({**paper, "audio": audio.ensure_durations(d, paper), "ja": tr.pop("items", {}),
                                "translation": tr})
+        m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/figures", path)
+        if m:
+            d = self._paper_dir(m.group(1))
+            if not d:
+                return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            try:
+                return self._json(figures.extract(d))   # 無い・古いときだけ作る（前に取り込んだ論文もここで作られる）
+            except Exception as e:
+                return self._json({"version": 0, "items": [], "error": str(e)})
+        m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/figures/([A-Za-z0-9_\-]+\.png)", path)
+        if m:
+            d = self._paper_dir(m.group(1))
+            return self._file(d / "figures" / m.group(2), "image/png") if d else self.send_error(HTTPStatus.NOT_FOUND)
         m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/ai_prompt", path)
         if m:
             d = self._paper_dir(m.group(1))
@@ -273,7 +289,9 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             py = HERE / ".venv" / "bin" / "python"
             check = f"{shlex.quote(str(py if py.exists() else 'python3'))} {shlex.quote(str(HERE / 'tools' / 'check_paper.py'))} {shlex.quote(str(d))}"
-            fixed = (HERE / "ai_fix_prompt.md").read_text(encoding="utf-8").replace("{check}", check)
+            pyq = shlex.quote(str(py if py.exists() else "python3"))
+            fixed = (HERE / "ai_fix_prompt.md").read_text(encoding="utf-8").replace("{check}", check) \
+                .replace("{python}", pyq).replace("{folder}", str(d))
             return self._json({"folder": str(d), "prompt": f"{d}\n\n{fixed}"})
         m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/translation", path)
         if m:
