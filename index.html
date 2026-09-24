@@ -115,6 +115,15 @@
     <section id="paper" hidden>
       <h2 id="paperTitle"></h2>
       <p id="paperMeta" class="muted"></p>
+      <p class="audioline"><button id="aiBtn" class="small">AI に手直しを頼む（プロンプトをコピー）</button>
+        <span id="manualTag" class="muted"></span></p>
+      <div id="aiPanel" class="aipanel" hidden>
+        <p class="muted">章分け・単語の区切り・文の切れ目・OCR などがうまくいかなかったとき、下の文を Claude Code などファイルを読み書きできる AI に貼ると、
+          元の PDF を見ながら <code>sentences.json</code> を直します（直す前は <code>sentences.orig.json</code> に残ります）。
+          直ったらこの論文を開き直すと、音声と訳が作り直されます。</p>
+        <textarea id="aiText" readonly rows="10"></textarea>
+        <p><button id="aiCopy" class="primary">コピー</button> <button id="aiClose" class="small">閉じる</button> <span id="aiMsg" class="muted"></span></p>
+      </div>
       <p id="audioLine" class="audioline"></p>
       <p id="trLine" class="audioline"></p>
 

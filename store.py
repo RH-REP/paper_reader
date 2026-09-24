@@ -3,6 +3,8 @@
   data/papers/<sha8>/original.pdf    取り込んだ PDF のコピー（正本）
   data/papers/<sha8>/meta.json       題名・元のファイル名・取り込み日時・sha256・OCR したページ
   data/papers/<sha8>/sentences.json  章と文（original.pdf から作り直せるキャッシュ）
+                                     AI などが手直ししたら最上位に "manual" が付き、自動の取り出し直しで上書きしない
+  data/papers/<sha8>/sentences.orig.json   手直し前の自動取り出し（手直しする側が残す）
 
 取り込みは元の PDF をコピーするだけで、元のファイルは動かさない。
 """
@@ -31,6 +33,48 @@ def _write_json(path: Path, obj) -> None:
     tmp = path.with_name(f"{path.stem}.{os.getpid()}.{threading.get_ident()}.tmp")   # 同時に書いてもぶつからない
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
     tmp.replace(path)
+
+
+KINDS = ("front", "body", "back")
+
+
+def normalize(paper: dict) -> tuple[dict, list[str]]:
+    """手直しされた sentences.json を確かめ、足りない項目（id・番号・読み上げ用の見出し・読み上げ用の文など）を補う。
+    返り値の2つ目は直せない誤り（空なら使える）。"""
+    errs: list[str] = []
+    if not isinstance(paper, dict) or not isinstance(paper.get("sections"), list):
+        return paper, ["最上位に sections（配列）が要る"]
+    for i, sec in enumerate(paper["sections"]):
+        where = f"sections[{i}]"
+        if not isinstance(sec, dict):
+            errs.append(f"{where} がオブジェクトでない")
+            continue
+        if not isinstance(sec.get("title"), str) or not sec["title"].strip():
+            errs.append(f"{where}.title が無い")
+            continue
+        if sec.get("kind") not in KINDS:
+            errs.append(f"{where}.kind は front / body / back のどれか（今: {sec.get('kind')!r}）")
+        if not isinstance(sec.get("sentences"), list):
+            errs.append(f"{where}.sentences（配列）が無い")
+            continue
+        m = extract.NUMBERED.match(sec["title"])
+        sec.setdefault("number", m.group(1) if m else "")
+        if not isinstance(sec.get("level"), int) or sec["level"] < 1:
+            sec["level"] = m.group(1).count(".") + 1 if m else 1
+        sec.setdefault("page", 1)
+        sec["id"] = f"s{i}"                               # 音声のファイル名になるので、並びどおりに付け直す
+        sec["speech_title"] = extract._heading_speech(sec["title"])
+        for k, s in enumerate(sec["sentences"]):
+            if isinstance(s, str):
+                s = sec["sentences"][k] = {"t": s}
+            if not isinstance(s, dict) or not isinstance(s.get("t"), str):
+                errs.append(f"{where}.sentences[{k}] に t（文字列）が無い")
+                continue
+            if not isinstance(s.get("s"), str):
+                s["s"] = extract.speech_text(s["t"])
+    paper.setdefault("title", "")
+    paper.setdefault("ocr_pages", [])
+    return paper, errs
 
 
 class Store:
@@ -63,9 +107,14 @@ class Store:
         return self._extract(d, meta, on_page)
 
     def reextract(self, pid: str) -> dict:
+        """PDF から取り出し直す（明示の操作）。手直し済みなら sentences.manual.json に退避してから上書きする。"""
         d = self.paper_dir(pid)
         with self._lock:
+            cur = d / "sentences.json"
+            if cur.exists() and '"manual"' in cur.read_text(encoding="utf-8"):
+                shutil.copy2(cur, d / "sentences.manual.json")
             meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+            meta.pop("manual", None)
             return self._extract(d, meta)
 
     def _extract(self, d: Path, meta: dict, on_page=None) -> dict:
@@ -96,6 +145,24 @@ class Store:
         d = self.paper_dir(pid)
         with self._lock:
             meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
-            if meta.get("extractor_version") != extract.EXTRACTOR_VERSION or not (d / "sentences.json").exists():
-                self._extract(d, meta)                  # 取り出し方を変えたら作り直す
-        return json.loads((d / "sentences.json").read_text(encoding="utf-8"))
+            path = d / "sentences.json"
+            raw = path.read_text(encoding="utf-8") if path.exists() else None
+            manual = raw is not None and '"manual"' in raw
+            if not manual and (meta.get("extractor_version") != extract.EXTRACTOR_VERSION or raw is None):
+                self._extract(d, meta)                  # 取り出し方を変えたら作り直す（手直し済みは上書きしない）
+                raw = path.read_text(encoding="utf-8")
+            try:
+                paper = json.loads(raw)
+            except ValueError as e:
+                raise ValueError(f"sentences.json が JSON として読めない（{e}）。sentences.orig.json に戻すか直してください") from e
+            paper, errs = normalize(paper)
+            if errs:
+                raise ValueError("sentences.json の形が正しくない: " + " / ".join(errs[:5]))
+            paper["id"] = pid
+            if paper.get("manual"):
+                counts = {"sections": len(paper["sections"]),
+                          "sentences": sum(len(s["sentences"]) for s in paper["sections"]), "manual": paper["manual"]}
+                if any(meta.get(k) != v for k, v in counts.items()):
+                    meta.update(counts)                  # 一覧の章・文の数を手直し後に合わせる
+                    _write_json(d / "meta.json", meta)
+        return paper

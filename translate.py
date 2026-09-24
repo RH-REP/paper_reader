@@ -43,6 +43,25 @@ def items(paper: dict) -> list[tuple[str, str]]:
     return [(f"{sec['id']}_{k}", s["t"]) for sec in paper["sections"] for k, s in enumerate(sec["sentences"], 1) if s["t"]]
 
 
+def items_hash(paper: dict) -> str:
+    import hashlib
+    return hashlib.sha1(json.dumps(items(paper), ensure_ascii=False).encode()).hexdigest()
+
+
+def is_current(paper_dir: Path, paper: dict) -> bool:
+    """今ある訳が、今の文と合っているか（目印の無い古いものは、取り出し方の版が同じなら合っているとみなす）。"""
+    st = status(paper_dir)
+    h = items_hash(paper)
+    if st.get("items_hash"):
+        return st["items_hash"] == h
+    if st.get("state") not in (None, "none", "running") and st.get("extractor_version") == paper.get("extractor_version") \
+            and not paper.get("manual"):
+        st["items_hash"] = h
+        _write(paper_dir, st)
+        return True
+    return False
+
+
 def status(paper_dir: Path) -> dict:
     p = paper_dir / "translation.json"
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {"state": "none"}
@@ -67,7 +86,8 @@ def _call(exe: Path, texts: list[str]) -> dict:
 def generate(paper_dir: Path, paper: dict) -> dict:
     its = items(paper)
     st = {"state": "running", "engine": "apple", "target": "ja", "total": len(its), "done": 0, "items": {},
-          "extractor_version": paper.get("extractor_version"), "started_at": datetime.now().isoformat(timespec="seconds")}
+          "extractor_version": paper.get("extractor_version"), "items_hash": items_hash(paper),
+          "started_at": datetime.now().isoformat(timespec="seconds")}
     _write(paper_dir, st)
     try:
         exe = translator()

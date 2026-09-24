@@ -21,6 +21,7 @@
 | `srs.py` | 復習の計算（py-fsrs、FSRS-6 の既定値、fuzz なし）。新しい語は1日20語まで |
 | `bundle.py` | スマホへ渡す zip と、スマホから戻る記録（JSON）の形 |
 | `share.py` | 同じ Wi‑Fi のスマホへの一時的な受け渡しページ（合言葉付きのアドレス、10分で閉じる） |
+| `ai_fix_prompt.md` `tools/check_paper.py` | AI に手直しを頼むときの決まった依頼文と、手直し後の確認コマンド。画面の「AI に手直しを頼む」で「フォルダの場所 ＋ 依頼文」をコピーできる。手直し済み（`sentences.json` の `manual`）は自動の取り出し直しで上書きしない。文が変わると音声・訳を作り直す（中身の目印 `items_hash`） |
 | `server.py` | 画面と API を 127.0.0.1 で配る（標準ライブラリの `http.server`） |
 | `index.html` `assets/` | 画面（読む・復習・スマホ） |
 | `tools/` | 取り込み（`import_pdf.py`）、辞書づくり（`build_dict.py` `build_pwa_dict.py`）、架空のサンプル PDF（`make_sample_pdf.py`） |

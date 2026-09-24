@@ -13,6 +13,7 @@
   POST /api/papers/<id>/reextract       章と文を作り直し、音声も作り直す
   POST /api/papers/<id>/audio           音声を今の声・速さで作り直す
   POST /api/papers/<id>/translate       文ごとの日本語訳を作り直す（macOS 内蔵の翻訳。端末内）
+  GET  /api/papers/<id>/ai_prompt       AI に手直しを頼むプロンプト（フォルダの場所 ＋ ai_fix_prompt.md）
   POST /api/papers/<id>/reveal          持ち出し用の音声フォルダ（export/）を Finder で開く
   GET  /api/papers/<id>/audio/<item>.m4a    1文ずつの音声
   GET  /api/papers/<id>/export/<file>.m4a   章ごとの音声
@@ -38,6 +39,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -136,9 +138,8 @@ class App:
             d = self.store.paper_dir(pid)
             paper = self.store.load(pid)
             st = audio.status(d)
-            # 作り終えたもの・失敗したもの（直さずにやり直しても同じ）は、明示の作り直しまで触らない
-            if not force and st.get("state") in ("done", "error") \
-                    and st.get("extractor_version") == paper.get("extractor_version"):
+            # 作り終えたもの・失敗したものは、文が変わる（AI の手直し・取り出し直し）か明示の作り直しまで触らない
+            if not force and st.get("state") in ("done", "error") and audio.is_current(d, paper):
                 return False
             t = threading.Thread(target=audio.generate, args=(d, paper, self.cfg["voice"], self.cfg["rate"]),
                                  daemon=True, name=f"audio-{pid}")
@@ -157,7 +158,7 @@ class App:
             paper = self.store.load(pid)
             st = translate.status(d)
             if not force and st.get("state") in ("done", "need_install", "unsupported", "error") \
-                    and st.get("extractor_version") == paper.get("extractor_version"):
+                    and translate.is_current(d, paper):
                 return False
             t = threading.Thread(target=translate.generate, args=(d, paper), daemon=True, name=key)
             self.jobs[key] = t
@@ -256,12 +257,24 @@ class Handler(SimpleHTTPRequestHandler):
             d = self._paper_dir(m.group(1))
             if not d:
                 return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
-            paper = app.store.load(m.group(1))
-            app.start_audio(m.group(1))                  # 無い・古いときだけ始まる
+            try:
+                paper = app.store.load(m.group(1))
+            except ValueError as e:                      # 手直しした sentences.json が壊れている
+                return self._json({"error": str(e)}, HTTPStatus.UNPROCESSABLE_ENTITY)
+            app.start_audio(m.group(1))                  # 無い・古い（文が変わった）ときだけ始まる
             app.start_translate(m.group(1))
             tr = translate.status(d)
             return self._json({**paper, "audio": audio.ensure_durations(d, paper), "ja": tr.pop("items", {}),
                                "translation": tr})
+        m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/ai_prompt", path)
+        if m:
+            d = self._paper_dir(m.group(1))
+            if not d:
+                return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            py = HERE / ".venv" / "bin" / "python"
+            check = f"{shlex.quote(str(py if py.exists() else 'python3'))} {shlex.quote(str(HERE / 'tools' / 'check_paper.py'))} {shlex.quote(str(d))}"
+            fixed = (HERE / "ai_fix_prompt.md").read_text(encoding="utf-8").replace("{check}", check)
+            return self._json({"folder": str(d), "prompt": f"{d}\n\n{fixed}"})
         m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/translation", path)
         if m:
             d = self._paper_dir(m.group(1))

@@ -44,6 +44,9 @@ button:disabled{opacity:.5;cursor:default}
 .opts select{font:inherit;max-width:240px}
 .status{font-size:13px;color:var(--ink2);margin-left:6px}
 /* 音声・訳を作っているあいだの進み具合 */
+.aipanel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:6px 0 10px}
+.aipanel textarea{width:100%;font:12px/1.5 ui-monospace,Menlo,monospace;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:8px}
+.aipanel code{font-size:12px}
 .job{display:inline-flex;align-items:center;gap:8px}
 .job progress{width:220px;height:10px;accent-color:var(--accent)}
 .prog{display:flex;align-items:center;gap:10px;margin:6px 0 2px}

@@ -62,6 +62,25 @@ def items(paper: dict) -> list[dict]:
     return out
 
 
+def items_hash(paper: dict) -> str:
+    """読み上げる中身の目印。文が変わったら（AI の手直し・取り出し直し）音声を作り直すのに使う。"""
+    import hashlib
+    return hashlib.sha1(json.dumps([(i["id"], i["text"]) for i in items(paper)], ensure_ascii=False).encode()).hexdigest()
+
+
+def is_current(paper_dir: Path, paper: dict) -> bool:
+    """今ある音声が、今の文と合っているか。目印の無い古い音声は、取り出し方の版が同じなら合っているとみなして目印を書き足す。"""
+    st = status(paper_dir)
+    h = items_hash(paper)
+    if st.get("items_hash"):
+        return st["items_hash"] == h
+    if st.get("state") == "done" and st.get("extractor_version") == paper.get("extractor_version") and not paper.get("manual"):
+        st["items_hash"] = h
+        _write_status(paper_dir, st)
+        return True
+    return False
+
+
 def _say(text: str, wav: Path, voice: str | None, rate: int):
     cmd = ["say", "-r", str(rate), "-o", str(wav), f"--data-format={DATA_FORMAT}"]
     if voice:
@@ -155,7 +174,7 @@ def generate(paper_dir: Path, paper: dict, voice: str | None = None, rate: int =
     voice = resolve_voice(voice)
     its = items(paper)
     st = {"state": "running", "voice": voice, "rate": rate, "total": len(its), "done": 0,
-          "extractor_version": paper.get("extractor_version"),
+          "extractor_version": paper.get("extractor_version"), "items_hash": items_hash(paper),
           "started_at": datetime.now().isoformat(timespec="seconds")}
     _write_status(paper_dir, st)
     try:

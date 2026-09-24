@@ -107,7 +107,9 @@ function uploadWithProgress(file, head) {
 // ---- 論文を開く ----
 async function openPaper(id) {
   stop();
-  const p = await api(`/api/papers/${id}`);
+  let p;
+  try { p = await api(`/api/papers/${id}`); }
+  catch (e) { status(`論文を開けません: ${e.message}`); $("placeholder").hidden = false; $("placeholder").textContent = `論文を開けません: ${e.message}`; return; }
   S.paper = p;
   S.audio = p.audio;
   pref.set("last", id);
@@ -123,7 +125,24 @@ async function openPaper(id) {
   watchAudio();
   renderTranslation();
   watchTranslation();
+  $("aiPanel").hidden = true;
+  $("manualTag").textContent = p.manual ? `AI 手直し済み（${(p.manual.at || "").slice(0, 16).replace("T", " ")}）${p.manual.notes ? `: ${p.manual.notes}` : ""}` : "";
 }
+
+// ---- AI に手直しを頼むプロンプト（フォルダの場所 ＋ 決まった依頼文）----
+$("aiBtn").onclick = async () => {
+  const r = await api(`/api/papers/${S.paper.id}/ai_prompt`);
+  $("aiText").value = r.prompt;
+  $("aiPanel").hidden = false;
+  $("aiMsg").textContent = "";
+};
+$("aiCopy").onclick = async () => {
+  const t = $("aiText");
+  try { await navigator.clipboard.writeText(t.value); }
+  catch { t.select(); document.execCommand("copy"); }
+  $("aiMsg").textContent = "コピーしました。AI に貼り付けてください";
+};
+$("aiClose").onclick = () => { $("aiPanel").hidden = true; };
 
 // 作っているあいだのプログレスバー: 「音声を作っています ▰▰▱ 37 / 162（23%・残り約1分）」
 // opts.pct: 「37 / 162」を出さず割合だけ（送った割合など）。total が 0 なら、まだ量がわからない（棒は左右に動く表示）
