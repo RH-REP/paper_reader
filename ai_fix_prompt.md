@@ -28,7 +28,7 @@ PDF から自動で取り出した「章と文」（sentences.json）に誤り�
 ```json
 {
   "title": "論文の題名",
-  "manual": {"by": "ai", "at": "2026-09-24T12:00:00+09:00", "notes": "直した内容の要約"},
+  "manual": {"by": "ai", "at": "<作業した今の日時（ISO 8601、例 YYYY-MM-DDThh:mm:ss+09:00）>", "notes": "<直した内容の要約>"},
   "sections": [
     {"title": "1. Introduction", "level": 1, "kind": "body",
      "sentences": [{"t": "画面に出す文。", "s": "読み上げる文。"}]}
@@ -36,6 +36,7 @@ PDF から自動で取り出した「章と文」（sentences.json）に誤り�
 }
 ```
 - 最上位の **"manual" を必ず付ける**（これが無いと、app の自動の取り出し直しで上書きされる）
+- "at" には作業した今の日時を入れる（`date -Iseconds` などで調べる。例の形をそのまま写さない）。"notes" には実際に直した内容を書く
 - 上の title / manual / sections / level / kind / sentences / t / s 以外のキー（id, number, speech_title, page, extractor_version など）は残しても消してもよい（app が付け直す）
 - UTF-8 の正しい JSON にする
 
