@@ -204,6 +204,14 @@ class App:
             .replace("{python}", shlex.quote(py)).replace("{folder}", str(d))
         return d, f"{d}\n\n{fixed}"
 
+    def audio_ready(self, pid: str) -> bool:
+        """今の文の音声がそろっているか（そろっていない論文を zip で渡すと、スマホではブラウザの読み上げになる）。"""
+        try:
+            d = self.store.paper_dir(pid)
+            return audio.status(d).get("state") == "done" and audio.is_current(d, self.store.load(pid))
+        except (KeyError, ValueError):
+            return False
+
     def ai_available(self) -> bool:
         """この Mac の Claude Code に頼めるか（claude があり、この app の .venv がある）。"""
         return bool(aifix.find_cli()) and (HERE / ".venv" / "bin" / "python").exists()
@@ -451,7 +459,8 @@ class Handler(SimpleHTTPRequestHandler):
             counts: dict[str, int] = {}
             for mk in app.state.marks():
                 counts[mk["paper_id"]] = counts.get(mk["paper_id"], 0) + 1
-            return self._json([{**m, "position": pos.get(m["id"]), "marks": counts.get(m["id"], 0)} for m in app.store.list()])
+            return self._json([{**m, "position": pos.get(m["id"]), "marks": counts.get(m["id"], 0),
+                                "audio_ready": app.audio_ready(m["id"])} for m in app.store.list()])
         if path == "/api/marks/export":
             pid = q.get("paper") or None
             if pid and not self._paper_dir(pid):

@@ -6,7 +6,7 @@ import * as srs from "./srs.js";
 import { unzipStored, text } from "./zip.js";
 import { fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating } from "./shared.js";
 
-const VERSION = "10";
+const VERSION = "11";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
@@ -381,43 +381,78 @@ function halt() {
   if ("speechSynthesis" in window) speechSynthesis.cancel();
 }
 
-function advance(g) { if (g !== S.gen || S.paused) return; S.pos++; speakCurrent(); }
+function advance(g) { if (g !== S.gen || S.paused) return; S.pos++; speakCurrent({ keep: true }); }
 
 // at: その文の何秒目から、fromEnd: 文の終わりの何秒前から（5秒・10秒戻す・進めるで文をまたぐとき）
+// 再生の記録（止まった・飛んだ理由を後から見る。最近の 80 件。「データ」の「再生の記録」）
+async function playLog(ev, detail = "") {
+  const it = S.items?.[S.pos];
+  const log = (await kv("play_log")) || [];
+  log.push({ t: new Date().toISOString(), ev, item: it ? `${S.paper?.id}/${it.id}` : "", detail: String(detail).slice(0, 160),
+             hidden: document.hidden });
+  await kv("play_log", log.slice(-80));
+}
+
+function speakTTS(it, g) {
+  if (!("speechSynthesis" in window)) return;
+  const u = new SpeechSynthesisUtterance(it.text);
+  u.lang = "en-US";
+  u.rate = parseFloat($("speed").value);
+  u.onend = () => advance(g);
+  u.onerror = (e) => { if (g !== S.gen) return; playLog("tts-error", e.error); advance(g); };   // 自分で止めたとき以外は次の文へ
+  speechSynthesis.speak(u);
+}
+
+// keep: 前の文が終わって次の文へ進むとき。音声を一度止めて空にしない（空にすると、画面が消えている間に
+// Android が「再生していない」とみなしてページを止め、次の文が鳴らないことがある）
 async function speakCurrent(opts = {}) {
   const g = ++S.gen;
-  halt();
-  if (S.pos >= S.items.length) { savePosition(true, true); S.playing = false; $("status").textContent = "読み終わりました"; setMedia(); renderResume(); return; }
+  if (opts.keep) { if ("speechSynthesis" in window) speechSynthesis.cancel(); }
+  else { S.ourPause = true; halt(); S.ourPause = false; }
+  if (S.pos >= S.items.length) { savePosition(true, true); S.playing = false; $("status").textContent = "読み終わりました"; setMedia(); renderResume(); playLog("finished"); return; }
   const it = S.items[S.pos];
   showProgress();
   const blob = await db.get("audio", `${S.paper.id}/${it.id}`);
   if (g !== S.gen) return;
   if (blob) {
+    const old = S.url;
     S.url = URL.createObjectURL(blob);
     const p = S.player;
     p.src = S.url;
+    if (old) setTimeout(() => URL.revokeObjectURL(old), 1000);
     p.playbackRate = parseFloat($("speed").value);
-    p.onended = () => advance(g);
-    p.onerror = () => advance(g);
+    p.onended = () => { S.errRun = 0; advance(g); };
+    p.onerror = () => {                              // 壊れた音声: 飛ばし続けずに、その文はブラウザの読み上げで
+      if (g !== S.gen) return;
+      S.errRun = (S.errRun || 0) + 1;
+      playLog("audio-error", `${p.error?.code || ""} ${it.id}`);
+      if (S.errRun >= 3) { S.paused = true; showProgress(); $("status").textContent = "音声を読めませんでした（▶ で続きから）"; setMedia(); return; }
+      speakTTS(it, g);
+    };
     p.onloadedmetadata = () => {
       if (opts.at) p.currentTime = Math.min(opts.at, p.duration);
       else if (opts.fromEnd) p.currentTime = Math.max(0, p.duration - opts.fromEnd);
     };
-    p.play().catch((e) => { if (g === S.gen) $("status").textContent = "再生できませんでした: " + e.message; });
-  } else if ("speechSynthesis" in window) {
-    const u = new SpeechSynthesisUtterance(it.text);
-    u.lang = "en-US";
-    u.rate = parseFloat($("speed").value);
-    u.onend = () => advance(g);
-    u.onerror = (e) => { if (e.error !== "interrupted" && e.error !== "canceled") advance(g); };
-    speechSynthesis.speak(u);
+    const tryPlay = (retry) => p.play().catch((e) => {
+      if (g !== S.gen || e.name !== "NotAllowedError") return;   // ファイルが無い・壊れている（NotSupportedError など）は onerror に任せる
+      if (retry) { playLog("play-retry", e.name); setTimeout(() => g === S.gen && tryPlay(false), 500); return; }
+      playLog("play-rejected", `${e.name}: ${e.message}`);
+      S.paused = true;
+      showProgress();
+      $("status").textContent = "再生できませんでした: " + e.message + "（▶ で続きから）";
+      setMedia();
+    });
+    tryPlay(true);
+  } else {
+    playLog("no-audio", it.id);                      // この文の音声が zip に無い → ブラウザの読み上げ
+    speakTTS(it, g);
   }
   setMedia();
 }
 
 function pauseResume() {
   if (!S.playing) return;
-  if (S.paused) { S.paused = false; if (S.player.src) S.player.play(); else speakCurrent(); }
+  if (S.paused) { S.paused = false; if (S.player.src && !S.player.error) S.player.play().catch(() => speakCurrent()); else speakCurrent(); }
   else { S.paused = true; savePosition(true); if (S.player.src) S.player.pause(); else { S.gen++; speechSynthesis.cancel(); } }
   showProgress();
   setMedia();
@@ -447,6 +482,7 @@ function stop() {
   Object.assign(S, { playing: false, paused: false, items: [] });
   halt();
   $("player").hidden = true;
+  setFull(false);
   setMedia();
   renderResume();
 }
@@ -455,6 +491,7 @@ function showProgress() {
   const where = it.heading ? "見出し" : `${it.n}/${it.sec.sentences.length}文`;
   $("status").textContent = `${S.paused ? "一時停止中 — " : ""}${it.sec.title} ・ ${where}（${S.pos + 1}/${S.items.length}）`;
   $("pause").textContent = S.paused ? "▶" : "⏸";
+  if (S.lastJaItem !== it.id) { S.lastJaItem = it.id; showJa(false); }   // 文が変わったら訳は隠す（押すと出る）
   $("nowText").dataset.sec = it.sec.id;
   $("nowText").dataset.t = it.heading ? "" : it.show;
   fillWords($("nowText"), it.show);
@@ -483,6 +520,56 @@ if ("mediaSession" in navigator) {
   navigator.mediaSession.setActionHandler("seekbackward", (d) => seekBy(-(d.seekOffset || 10)));   // ロック画面の戻す・進める
   navigator.mediaSession.setActionHandler("seekforward", (d) => seekBy(d.seekOffset || 10));
 }
+// 自分で止めていないのに音声が止まった（電話・通知・ほかの app の音・イヤホンを抜いた など、Android が止めた）
+// → 一時停止の見た目にして記録する（見た目は ⏸ のまま、音だけ止まって「勝手に止まった」ように見えていた）
+S.player.addEventListener("pause", () => {
+  if (S.ourPause || !S.playing || S.paused || S.player.ended || !S.player.src) return;
+  S.paused = true;
+  playLog("system-pause");
+  showProgress();
+  setMedia();
+});
+document.addEventListener("visibilitychange", () => { if (S.playing && !S.paused) playLog(document.hidden ? "hidden" : "visible"); });
+
+// ---- 再生バーを引き上げて画面いっぱいに（下げる・戻るで元に）----
+function setFull(on) {
+  if (on === $("player").classList.contains("full")) return;
+  $("player").classList.toggle("full", on);
+  if (on) history.pushState({ full: 1 }, "");
+  else if (history.state?.full) history.back();
+  showJa(false);
+}
+function showJa(on) {
+  const it = S.items[S.pos];
+  const ja = it && !it.heading ? S.paper?.ja?.[it.id] : null;
+  $("jaBtn").hidden = !ja || on;
+  $("nowJa").hidden = !ja || !on;
+  $("nowJa").textContent = on && ja ? ja : "";
+  $("jaBtn").textContent = "押して翻訳を表示";
+  if (!ja) { $("jaBtn").hidden = false; $("jaBtn").disabled = true; $("jaBtn").textContent = it?.heading ? "（見出し）" : "（訳なし）"; }
+  else $("jaBtn").disabled = false;
+}
+addEventListener("popstate", () => { if ($("player").classList.contains("full")) $("player").classList.remove("full"); });
+$("grab").onclick = () => setFull(!$("player").classList.contains("full"));
+$("jaBtn").onclick = () => showJa(true);
+$("nowJa").onclick = () => showJa(false);
+let grabY = null;
+for (const el of [$("grab"), $("player")]) {
+  el.addEventListener("touchstart", (e) => {
+    if (e.target.closest("input,button:not(#grab),.w,a")) return;
+    if ($("player").classList.contains("full") && e.target.closest(".nowrow,.nowja")) return;   // 文を読むためのスクロールで閉じない
+    grabY = e.touches[0].clientY;
+  }, { passive: true });
+}
+$("player").addEventListener("touchend", (e) => {
+  if (grabY === null) return;
+  const dy = e.changedTouches[0].clientY - grabY;
+  grabY = null;
+  const full = $("player").classList.contains("full");
+  if (!full && dy < -40) setFull(true);                // 引き上げる
+  else if (full && dy > 80) setFull(false);            // 引き下げる
+}, { passive: true });
+
 $("playAll").onclick = () => playAllOrResume();
 $("playTop").onclick = () => playAllOrResume(true);
 $("pause").onclick = pauseResume;
@@ -847,6 +934,22 @@ async function exportProgress() {
   return `「ダウンロード」に保存しました（${name}、引いた語 ${lookups.length}・答え ${reviews.length}）`;
 }
 $("exportBtn").onclick = async () => { $("exportMsg").textContent = await exportProgress(); loadStats(); };
+
+async function renderPlayLog() {
+  const names = { finished: "最後まで読んだ", "audio-error": "音声を読めなかった", "tts-error": "ブラウザの読み上げが止まった",
+                  "play-retry": "再生を拒まれたので呼び直した", "play-rejected": "再生を拒まれた（一時停止にした）",
+                  "system-pause": "Android・機器が止めた（電話・通知・ほかの音・イヤホン）", "no-audio": "音声が無いのでブラウザの読み上げ",
+                  hidden: "画面を消した・ほかの app へ", visible: "画面に戻った" };
+  const ol = $("playLogList");
+  ol.textContent = "";
+  for (const e of ((await kv("play_log")) || []).slice(-40).reverse()) {
+    const li = document.createElement("li");
+    li.textContent = `${new Date(e.t).toLocaleString("ja-JP")} ${names[e.ev] || e.ev}${e.hidden ? "（画面オフ）" : ""} ${e.detail || ""}`;
+    ol.appendChild(li);
+  }
+  if (!ol.children.length) ol.innerHTML = "<li>まだ記録はありません</li>";
+}
+$("playLogBox").ontoggle = () => { if ($("playLogBox").open) renderPlayLog(); };
 
 async function loadStats() {
   const [papers, audioKeys, figKeys, words, reviews, lookups] = await Promise.all(

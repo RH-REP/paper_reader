@@ -365,6 +365,20 @@ function renderSections() {
   }
 }
 
+function renderPlayLog() {
+  const ol = $("playLogList");
+  ol.textContent = "";
+  const names = { finished: "最後まで読んだ", "audio-error": "音声ファイルを読めなかった", "tts-error": "ブラウザの読み上げが止まった",
+                  "play-retry": "再生を拒まれたので呼び直した", "play-rejected": "再生を拒まれた（一時停止にした）",
+                  "system-pause": "OS・機器の操作で止まった" };
+  for (const e of pref.get("playLog", []).slice(-30).reverse()) {
+    const li = document.createElement("li");
+    li.textContent = `${new Date(e.t).toLocaleString("ja-JP")}  ${names[e.ev] || e.ev}  ${e.item} ${e.detail}`;
+    ol.appendChild(li);
+  }
+  if (!ol.children.length) ol.innerHTML = "<li>まだ記録はありません</li>";
+}
+
 // ---- しおり（聞いた位置）----
 // 位置は文の中身で覚える（章の編集や AI の手直しで番号がずれても戻れる）。文が変わるたび・一時停止・停止で保存する
 function savePosition(force = false, finished = false) {
@@ -885,32 +899,64 @@ function advance(g) {
 }
 
 // at: その文の何秒目から、fromEnd: 文の終わりの何秒前から（5秒・10秒戻す・進めるで文をまたぐとき）
+// 再生の記録（止まった・飛んだ理由を後から見られるように。最近の 80 件）
+function playLog(ev, detail = "") {
+  const it = S.items?.[S.pos];
+  const log = pref.get("playLog", []);
+  log.push({ t: new Date().toISOString(), ev, item: it ? `${S.paper?.id}/${it.id}` : "", detail: String(detail).slice(0, 160) });
+  pref.set("playLog", log.slice(-80));
+  if ($("playLogBox")?.open) renderPlayLog();
+}
+
+function speakTTS(it, g) {
+  if (!("speechSynthesis" in window)) { status("音声ができるまでお待ちください"); return; }
+  const u = new SpeechSynthesisUtterance(it.text);
+  u.lang = "en-US";
+  u.rate = parseFloat($("speed").value);
+  u.onend = () => advance(g);
+  // 自分で止めた（canceled / interrupted で世代が変わった）とき以外は、止めずに次の文へ
+  u.onerror = (e) => { if (g !== S.gen) return; playLog("tts-error", e.error); advance(g); };
+  speechSynthesis.speak(u);
+}
+
 function speakCurrent(opts = {}) {
   const g = ++S.gen;
+  S.ourPause = true;
   haltOutput();
-  if (S.pos >= S.items.length) { S.playing = false; status("読み終わりました"); $("nowRow").hidden = true; savePosition(true, true); return; }
+  S.ourPause = false;
+  if (S.pos >= S.items.length) { S.playing = false; status("読み終わりました"); $("nowRow").hidden = true; savePosition(true, true); playLog("finished"); return; }
   const it = S.items[S.pos];
   showProgress();
   if (S.audio?.state === "done") {
     const p = S.player;
     p.src = `/api/papers/${S.paper.id}/audio/${it.id}.m4a`;
     p.playbackRate = parseFloat($("speed").value);
-    p.onended = () => advance(g);
-    p.onerror = () => advance(g);
+    p.onended = () => { S.errRun = 0; advance(g); };
+    // ファイルが取れない（作り直しの最中など）: 次々に飛ばして終わりまで行ってしまわないよう、その文はブラウザの読み上げで読む。
+    // 3回続いたら、飛ばさずに一時停止して理由を出す
+    p.onerror = () => {
+      if (g !== S.gen) return;
+      S.errRun = (S.errRun || 0) + 1;
+      playLog("audio-error", `${p.error?.code || ""} ${it.id}`);
+      api(`/api/papers/${S.paper.id}/audio`).then((st) => { S.audio = st; renderAudio(); watchAudio(); }).catch(() => {});   // 作り直し中なら見張る
+      if (S.errRun >= 3) { S.paused = true; showProgress(); status(`音声ファイルを読めませんでした（作り直しの最中かもしれません）。▶ で続きから`); return; }
+      speakTTS(it, g);
+    };
     p.onloadedmetadata = () => {
       if (opts.at) p.currentTime = Math.min(opts.at, p.duration);
       else if (opts.fromEnd) p.currentTime = Math.max(0, p.duration - opts.fromEnd);
     };
-    p.play().catch((e) => { if (g === S.gen) status("再生できませんでした: " + e.message); });
-  } else if ("speechSynthesis" in window) {
-    const u = new SpeechSynthesisUtterance(it.text);
-    u.lang = "en-US";
-    u.rate = parseFloat($("speed").value);
-    u.onend = () => advance(g);
-    u.onerror = (e) => { if (e.error !== "interrupted" && e.error !== "canceled") advance(g); };
-    speechSynthesis.speak(u);
+    const tryPlay = (retry) => p.play().catch((e) => {
+      if (g !== S.gen || e.name !== "NotAllowedError") return;   // ファイルが無い・壊れている（NotSupportedError など）は onerror に任せる
+      if (retry) { playLog("play-retry", e.name); setTimeout(() => g === S.gen && tryPlay(false), 500); return; }
+      playLog("play-rejected", `${e.name}: ${e.message}`);
+      S.paused = true;
+      showProgress();
+      status("再生できませんでした: " + e.message + "（▶ で続きから）");
+    });
+    tryPlay(true);
   } else {
-    status("音声ができるまでお待ちください");
+    speakTTS(it, g);
   }
 }
 
@@ -918,7 +964,7 @@ function pauseResume() {
   if (!S.playing) return;
   if (S.paused) {
     S.paused = false;
-    if (S.audio?.state === "done" && S.player.src) { S.player.play(); showProgress(); }
+    if (S.audio?.state === "done" && S.player.src && !S.player.error) { S.player.play().catch(() => speakCurrent()); showProgress(); }
     else speakCurrent();                          // ブラウザ読み上げはその文の頭から
   } else {
     S.paused = true;
@@ -1370,7 +1416,7 @@ $("revSay").onclick = () => S.review?.card && playOnce(`/api/word_audio?w=${enco
 async function loadPhone() {
   // 起動直後にこのタブが開いていても、設定（URL）と論文の一覧を読んでから作る
   if (!S.cfg) await loadConfig();
-  if (!S.papers.length) S.papers = await api("/api/papers");
+  S.papers = await api("/api/papers");                // 音声がそろっているかを最新にする
   const url = S.cfg.pwa_url;
   $("pwaLink").href = url;
   $("pwaLink").textContent = url;
@@ -1384,6 +1430,12 @@ async function loadPhone() {
     li.innerHTML = `<label><input type="checkbox" value="${m.id}"> <span></span></label>`;
     li.querySelector("input").checked = want.has(m.id);
     li.querySelector("span").textContent = `${m.title}（${m.sentences}文）`;
+    if (!m.audio_ready) {                            // 音声を作り直し中の論文は、今送るとスマホで音声が無い
+      const w = document.createElement("small");
+      w.className = "warn";
+      w.textContent = " 音声を作っています（今送ると、スマホではブラウザの読み上げになり、画面を消すと止まりやすい）";
+      li.querySelector("label").appendChild(w);
+    }
     li.querySelector("input").onchange = updateBundleLink;
     ul.appendChild(li);
   }
@@ -1432,6 +1484,14 @@ $("progressInput").onchange = async (e) => {
 };
 
 // ---- つなぎこみ ----
+// 自分で止めていないのに音声が止まった（OS のメディアキー・イヤホンを抜いた など）→ 一時停止の見た目にして記録する
+S.player.addEventListener("pause", () => {
+  if (S.ourPause || !S.playing || S.paused || S.player.ended || !S.player.src) return;
+  S.paused = true;
+  playLog("system-pause");
+  showProgress();
+});
+$("playLogBox").ontoggle = () => { if ($("playLogBox").open) renderPlayLog(); };
 $("playAll").onclick = () => playAllOrResume();
 $("playTop").onclick = () => playAllOrResume(true);
 $("nowMark").onclick = () => { const it = S.items[S.pos]; if (it && !it.heading) toggleMark(it.show, it.sec.title); };

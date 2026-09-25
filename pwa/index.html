@@ -88,6 +88,7 @@
     <div class="panel">
       <h3>このスマホに入っているもの</h3>
       <ul id="stats" class="plain"></ul>
+      <details id="playLogBox"><summary>再生の記録（止まった・飛んだときの理由）</summary><ol id="playLogList" class="small"></ol></details>
       <p><button id="dictBtn" class="btn">辞書をオフライン用に保存（約5MB）</button></p>
       <p><button id="wipeBtn" class="btn danger">このスマホのデータをすべて消す</button></p>
     </div>
@@ -142,6 +143,7 @@
 
 <!-- 再生バー -->
 <div id="player" class="player" hidden>
+  <button id="grab" class="grab" aria-label="引き上げて大きく表示（下げると戻る）"><span></span></button>
   <div class="prog">
     <span id="tCur" class="t">0:00</span>
     <input type="range" id="progress" min="0" max="1000" step="1" value="0" aria-label="再生位置（動かすとその位置へ）">
@@ -149,7 +151,8 @@
   </div>
   <div class="nowrow"><button id="nowMark" class="mk" title="この文に印">☆</button><p id="nowText" class="now"></p>
     <img id="nowFig" class="nowfig" hidden alt=""></div>
-  <div class="prow">
+  <div id="nowJaBox" class="nowja"><button id="jaBtn" class="btn">押して翻訳を表示</button><p id="nowJa" hidden></p></div>
+  <div class="prow ctrl">
     <button id="prev" class="icon" title="前の文">⏮</button>
     <button data-seek="-10" class="seek">−10</button>
     <button data-seek="-5" class="seek">−5</button>
@@ -157,9 +160,8 @@
     <button data-seek="5" class="seek">+5</button>
     <button data-seek="10" class="seek">+10</button>
     <button id="next" class="icon" title="次の文">⏭</button>
-    <button id="stop" class="icon" title="停止">■</button>
   </div>
-  <div class="prow"><span class="muted small">秒で戻す・進める ・ ⏮⏭ は前後の文</span>
+  <div class="prow"><button id="stop" class="btn stopbtn" title="停止">■ 停止</button>
     <label class="speed"><input type="range" id="speed" min="0.7" max="2" step="0.05" value="1"><span id="speedVal">1.00×</span></label>
   </div>
   <p id="status" class="muted small"></p>

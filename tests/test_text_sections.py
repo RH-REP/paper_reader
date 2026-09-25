@@ -203,6 +203,10 @@ class CacheTest(unittest.TestCase):
         st = audio.generate(self.d, p, rate=300)
         self.assertEqual((st["state"], st["total"], st["reused"]), ("done", n + 1, n))   # 新しい見出しだけ作る
         self.assertTrue((self.d / "audio" / "s4_h.m4a").exists())
+        # 新しい音声は作業用の場所で作ってから入れ替える（途中で前の音声を消さない）。終わったら作業用の場所は残らない
+        self.assertFalse((self.d / "audio" / "_new").exists())
+        self.assertFalse((self.d / "export_new").exists())
+        self.assertEqual(len(list((self.d / "audio").glob("*.m4a"))), n + 1)
         self.assertEqual(len(list((self.d / "audio" / "cache").glob("*.wav"))), n + 1)
         self.assertGreater(st["durations"]["s4_1"], 0.3)
 

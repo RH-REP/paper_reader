@@ -179,11 +179,13 @@ def generate(paper_dir: Path, paper: dict, voice: str | None = None, rate: int =
     audio_dir, export_dir = paper_dir / "audio", paper_dir / "export"
     cache = audio_dir / "cache"
     cache.mkdir(parents=True, exist_ok=True)
-    for f in audio_dir.iterdir():                        # 控え（cache/）だけ残して消す
-        if f != cache:
-            shutil.rmtree(f) if f.is_dir() else f.unlink()
-    shutil.rmtree(export_dir, ignore_errors=True)
-    export_dir.mkdir(parents=True)
+    # 前の音声は、新しい音声がそろうまで消さない（聞いている途中の画面がファイルを取れず、残りを飛ばして止まっていた）。
+    # 新しい1文ずつの音声は _new/、章ごとの1本ものは export_new/ に作り、終わってから入れ替える
+    new_dir, new_export = audio_dir / "_new", paper_dir / "export_new"
+    for d in (new_dir, new_export, audio_dir / "_wav"):
+        shutil.rmtree(d, ignore_errors=True)
+    new_dir.mkdir()
+    new_export.mkdir()
     work = audio_dir / "_wav"
     work.mkdir()
     voice = resolve_voice(voice)
@@ -206,7 +208,7 @@ def generate(paper_dir: Path, paper: dict, voice: str | None = None, rate: int =
                     _to_m4a(tmp, m4a)
                     tmp.replace(wav)
             shutil.copyfile(wav, work / f"{it['id']}.wav")
-            shutil.copyfile(m4a, audio_dir / f"{it['id']}.m4a")
+            shutil.copyfile(m4a, new_dir / f"{it['id']}.m4a")
             return reused
 
         with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -238,17 +240,25 @@ def generate(paper_dir: Path, paper: dict, voice: str | None = None, rate: int =
             everything += parts
             tmp = work / "_chapter.wav"
             _concat(parts, tmp)
-            _to_m4a(tmp, export_dir / ch["file"])
+            _to_m4a(tmp, new_export / ch["file"])
         if everything:
             tmp = work / "_all.wav"
             _concat(everything, tmp)
-            _to_m4a(tmp, export_dir / "00_all.m4a")
+            _to_m4a(tmp, new_export / "00_all.m4a")
+        for f in audio_dir.glob("*.m4a"):                # そろったので入れ替える（数ミリ秒）
+            f.unlink()
+        for f in new_dir.iterdir():
+            f.replace(audio_dir / f.name)
+        shutil.rmtree(export_dir, ignore_errors=True)
+        new_export.replace(export_dir)
         st.update(state="done", chapters=[{"title": c["title"], "file": c["file"]} for c in chs],
                   finished_at=datetime.now().isoformat(timespec="seconds"))
     except Exception as e:  # say / afconvert の失敗など
         st.update(state="error", error=str(e))
     finally:
         shutil.rmtree(work, ignore_errors=True)
+        shutil.rmtree(new_dir, ignore_errors=True)
+        shutil.rmtree(new_export, ignore_errors=True)
         _write_status(paper_dir, st)
     return st
 
