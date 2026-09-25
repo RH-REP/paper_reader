@@ -32,11 +32,18 @@
 
   <main id="main">
     <section id="reviewView" class="view" hidden>
-      <h2>復習</h2>
+      <h2>復習 <span class="modes" id="revModes"><button data-mode="meaning">意味を思い出す</button><button data-mode="cloze">空欄を埋める</button></span></h2>
       <p id="revCounts" class="counts"></p>
       <div id="revCard" class="card" hidden>
         <div class="front">
-          <div class="hw"><span id="revWord"></span> <button id="revSay" class="small" title="発音">🔈</button></div>
+          <div id="revCloze" class="cloze" hidden>
+            <div id="czJa" class="cz-ja"></div>
+            <div id="czEn" class="cz-en"></div>
+            <div class="cz-row"><button id="czCheck" class="primary">確かめる <kbd>Enter</kbd></button>
+              <button id="czHint" class="small">ヒント（頭文字）</button> <button id="czGiveUp" class="small">わからない</button>
+              <span id="czMsg" class="cz-msg"></span></div>
+          </div>
+          <div id="revHead" class="hw"><span id="revWord"></span> <button id="revSay" class="small" title="発音">🔈</button></div>
           <div id="revExamples" class="examples"></div>
         </div>
         <div id="revBack" class="back" hidden>
@@ -63,6 +70,8 @@
                 <li><b>難しい</b>: なんとか思い出した</li>
                 <li><b>正解</b>: 少し考えて思い出した（迷ったらこれ）</li>
                 <li><b>簡単</b>: すぐわかった（間隔が大きく伸びる）</li></ul></li>
+          <li><b>空欄を埋める</b>: 単語を登録した文の日本語訳と、その単語を空欄にした英文が出ます。空欄に入る語を打って Enter（活用形も正解、1字違いは「惜しい」）。
+            結果から勧める答え（間違い → もう一度、ヒント・惜しい → 難しい、正解 → 正解）が太字になり、Enter でそのまま選べます。復習の予定は「意味を思い出す」と同じです。</li>
           <li>新しい単語は1日20語まで。期限の来た単語が先に出ます。間隔は FSRS（Anki と同じ方式）で決まります。</li>
         </ol></details>
     </section>

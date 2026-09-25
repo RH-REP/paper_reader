@@ -99,3 +99,87 @@ export function resumeIndex(items, pos) {
   i = items.findIndex((it) => it.id === pos.item_id);
   return { index: Math.max(0, i), at: 0, exact: false };
 }
+
+// ---- 復習の「空欄を埋める」モード ----
+function stems(w) {
+  w = String(w || "").toLowerCase().trim();
+  const out = new Set([w]);
+  const add = (x) => { if (x && x.length >= 2) out.add(x); };
+  if (w.endsWith("ies")) add(w.slice(0, -3) + "y");
+  if (w.endsWith("es")) add(w.slice(0, -2));
+  if (w.endsWith("s") && !w.endsWith("ss")) add(w.slice(0, -1));
+  if (w.endsWith("ied")) add(w.slice(0, -3) + "y");
+  for (const suf of ["ed", "ing"]) {
+    if (!w.endsWith(suf)) continue;
+    const b = w.slice(0, -suf.length);
+    add(b); add(b + "e");
+    if (b.length > 2 && b.at(-1) === b.at(-2)) add(b.slice(0, -1));   // stopped → stop
+  }
+  return out;
+}
+
+function editDistance(a, b) {
+  a = a.toLowerCase(); b = b.toLowerCase();
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+
+// 例文の中の、その単語の出てくる所（引いたときの形 query を優先し、無ければ見出し語の活用形）→ {before, answer, after}
+export function clozeParts(sentence, headword, query) {
+  if (!sentence || !headword) return null;
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const tries = [];
+  if (query) tries.push(new RegExp(`(?<![A-Za-z])(${esc(query)})(?![A-Za-z])`, "i"));
+  tries.push(new RegExp(`(?<![A-Za-z])(${esc(headword)}(?:s|es|d|ed|ing)?)(?![A-Za-z])`, "i"));
+  const stem = headword.length > 4 ? headword.replace(/(e|y)$/i, "") : headword;
+  tries.push(new RegExp(`(?<![A-Za-z])(${esc(stem)}[a-z]{0,4})(?![A-Za-z])`, "i"));
+  for (const re of tries) {
+    const m = sentence.match(re);
+    if (m) return { before: sentence.slice(0, m.index), answer: m[1], after: sentence.slice(m.index + m[1].length) };
+  }
+  return null;
+}
+
+// 入力の判定: exact（文のとおり）/ form（見出し語・別の活用形）/ near（1字違い。長い語は2字まで）/ wrong
+export function checkCloze(input, answer, headword) {
+  const x = String(input || "").trim().toLowerCase();
+  if (!x) return "wrong";
+  if (x === answer.toLowerCase()) return "exact";
+  const target = new Set([...stems(answer), ...stems(headword)]);
+  if ([...stems(x)].some((s) => target.has(s))) return "form";
+  const lim = answer.length >= 8 ? 2 : 1;
+  return [answer, headword].some((t) => editDistance(x, t) <= lim) ? "near" : "wrong";
+}
+
+// 勧める答え: 間違い・わからない → 1、ヒントを使った・惜しい → 2、正解 → 3
+export function suggestRating(result, usedHint) {
+  if (result === "wrong") return 1;
+  if (result === "near" || usedHint) return 2;
+  return 3;
+}
+
+// どの例文で出すか: 空欄を作れる文のうち、訳のあるものを先に。答えた回数で順番に替える。無ければ null
+const CITE = /\s*\((?=[^()]*\b(?:19|20)\d{2}[a-z]?\b)[^()]*\)|\s*\[\d+(?:\s*[-–,]\s*\d+)*\]|(?<=[A-Za-z.,;)])[¹²³⁴⁵⁶⁷⁸⁹⁰][⁰¹²³⁴⁵⁶⁷⁸⁹˒,–-]*/g;
+
+// 問題に出す形: 引用（(Smith et al., 2020)・[12]・上付きの番号）を外し、長い文は空欄の前後 90 字ほどに縮める
+function clozeText(parts) {
+  const clean = (t) => t.replace(CITE, "");
+  let before = clean(parts.before), after = clean(parts.after);
+  if (before.length > 110) before = "… " + before.slice(before.length - 90).replace(/^\S*\s/, "");
+  if (after.length > 110) after = after.slice(0, 90).replace(/\s\S*$/, "") + " …";
+  return { before, answer: parts.answer, after };
+}
+
+export function pickExample(card) {
+  const list = (card.examples || []).map((e) => {
+    const parts = clozeParts(e.sentence, card.headword, e.query);
+    return { ...e, parts: parts && clozeText(parts) };
+  }).filter((e) => e.parts);
+  if (!list.length) return null;
+  const withJa = list.filter((e) => e.ja);
+  const pool = withJa.length ? withJa : list;
+  return pool[(card.reviews || 0) % pool.length];
+}

@@ -1,7 +1,7 @@
 // paper_reader の画面。論文の一覧・取り込み・章ごとの読み上げ・単語検索と単語帳。
 // 読み上げは、サーバーが say で作った1文ずつの m4a を順に鳴らす（どのブラウザでも同じ声）。
 // 音声がまだできていない間だけ、ブラウザの読み上げ（Web Speech API）で代わりに読む。
-import { fillWords as fillShared, labelKey, refKeys, resumeIndex } from "./shared.js";
+import { fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating } from "./shared.js";
 
 const $ = (id) => document.getElementById(id);
 const S = { papers: [], paper: null, audio: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
@@ -1262,7 +1262,85 @@ function renderReview(q) {
   $("revBack").hidden = true;
   $("revButtons").hidden = true;
   $("revShow").hidden = false;
+  document.querySelectorAll("#revButtons button").forEach((b) => b.classList.remove("suggest"));
+  setupCloze(c);
 }
+
+// ---- 「空欄を埋める」モード: 例文の日本語訳を見て、英文の空欄に単語を打つ ----
+function setupCloze(c) {
+  S.cz = null;
+  const ex = S.revMode === "cloze" ? pickExample(c) : null;
+  $("revCloze").hidden = !ex;
+  $("revHead").hidden = !!ex;
+  $("revExamples").hidden = !!ex;
+  if (!ex) {
+    if (S.revMode === "cloze") $("revSource").textContent += " ・ 空欄を作れる例文が無いので「意味を思い出す」で出しています";
+    return;
+  }
+  S.cz = { ex, hint: false, done: false, t0: Date.now() };
+  $("revShow").hidden = true;
+  $("czJa").textContent = ex.ja || `（訳なし）意味: ${c.meaning.split(/\n| \/ /)[0]}`;
+  const en = $("czEn");
+  en.textContent = "";
+  const inp = document.createElement("input");
+  inp.id = "czInput";
+  inp.autocomplete = "off";
+  inp.spellcheck = false;
+  inp.setAttribute("autocapitalize", "off");
+  inp.placeholder = `${ex.parts.answer.length}字`;
+  inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); checkClozeAnswer(); } };
+  en.append(ex.parts.before, inp, ex.parts.after);
+  if (ex.section) { const s = document.createElement("div"); s.className = "muted"; s.textContent = ex.section; en.appendChild(s); }
+  $("czMsg").textContent = "";
+  $("czCheck").hidden = $("czHint").hidden = $("czGiveUp").hidden = false;
+  setTimeout(() => inp.focus(), 0);
+}
+
+function checkClozeAnswer(giveUp = false) {
+  const cz = S.cz;
+  if (!cz || cz.done) return;
+  const inp = $("czInput");
+  const typed = giveUp ? "" : inp.value;
+  const res = giveUp ? "wrong" : checkCloze(typed, cz.ex.parts.answer, S.review.card.headword);
+  cz.done = true;
+  const ans = document.createElement("span");
+  ans.className = "cz-ans " + (res === "wrong" ? "ng" : "ok");
+  ans.textContent = cz.ex.parts.answer;
+  inp.replaceWith(ans);
+  if (typed && res !== "exact") {
+    const you = document.createElement("span");
+    you.className = "cz-you";
+    you.textContent = typed;
+    ans.after(you);
+  }
+  $("czMsg").textContent = { exact: "正解", form: "正解（形が違う）", near: "惜しい（つづり）", wrong: giveUp ? "答え" : "違います" }[res];
+  $("czCheck").hidden = $("czHint").hidden = $("czGiveUp").hidden = true;
+  $("revHead").hidden = false;                       // 見出し語・意味・例文を出す
+  $("revBack").hidden = false;
+  $("revButtons").hidden = false;
+  cz.suggest = suggestRating(res, cz.hint);
+  document.querySelectorAll("#revButtons button").forEach((b) => b.classList.toggle("suggest", Number(b.dataset.r) === cz.suggest));
+  if (cz.ex.audio_ref) { const [pid, item] = cz.ex.audio_ref.split("/"); playOnce(`/api/papers/${pid}/audio/${item}.m4a`); }
+}
+
+function setRevMode(m) {
+  S.revMode = m;
+  pref.set("reviewMode", m);
+  document.querySelectorAll("#revModes button").forEach((b) => b.classList.toggle("on", b.dataset.mode === m));
+  if (S.review) renderReview(S.review);
+}
+S.revMode = pref.get("reviewMode", "meaning");
+document.querySelectorAll("#revModes button").forEach((b) => { b.onclick = () => setRevMode(b.dataset.mode); b.classList.toggle("on", b.dataset.mode === S.revMode); });
+$("czCheck").onclick = () => checkClozeAnswer();
+$("czGiveUp").onclick = () => checkClozeAnswer(true);
+$("czHint").onclick = () => {
+  const cz = S.cz;
+  if (!cz || cz.done) return;
+  cz.hint = true;
+  const a = cz.ex.parts.answer;
+  $("czInput").placeholder = `${a[0]}${"_".repeat(a.length - 1)}（${a.length}字）`;
+  $("czInput").focus();
+};
 
 function playOnce(src) { S.wordAudio.src = src; S.wordAudio.play().catch(() => {}); }
 
@@ -1279,7 +1357,8 @@ async function undoReview() {
   if (!q.undone) $("revDone").textContent = "取り消せる答えがありません。";
 }
 function reviewKey(e) {
-  if (e.code === "Space" || e.key === "Enter") { e.preventDefault(); if ($("revButtons").hidden) revealAnswer(); else rate(3); }
+  if (S.cz && !S.cz.done) return;                   // 空欄に打っている間は、キーを答えに使わない
+  if (e.code === "Space" || e.key === "Enter") { e.preventDefault(); if ($("revButtons").hidden) revealAnswer(); else rate(S.cz?.suggest || 3); }
   else if (RATING_KEYS[e.key]) rate(RATING_KEYS[e.key]);
   else if (e.key === "z" || e.key === "Z") undoReview();
 }

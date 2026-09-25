@@ -37,9 +37,16 @@
 
   <!-- 復習 -->
   <section id="v-review" class="view" hidden>
+    <p class="center"><span class="modes" id="revModes"><button data-mode="meaning">意味を思い出す</button><button data-mode="cloze">空欄を埋める</button></span></p>
     <p id="revCounts" class="counts"></p>
     <div id="revCard" class="card" hidden>
-      <div class="hw"><span id="revWord"></span> <button id="revSay" class="icon" title="発音">🔈</button></div>
+      <div id="revCloze" class="cloze" hidden>
+        <div id="czJa" class="cz-ja"></div>
+        <div id="czEn" class="cz-en"></div>
+        <div class="cz-row"><button id="czCheck" class="primary">確かめる</button> <button id="czHint" class="btn">頭文字</button>
+          <button id="czGiveUp" class="btn">わからない</button> <span id="czMsg" class="cz-msg"></span></div>
+      </div>
+      <div id="revHead" class="hw"><span id="revWord"></span> <button id="revSay" class="icon" title="発音">🔈</button></div>
       <div id="revExamples" class="examples"></div>
       <div id="revBack" class="back" hidden><div id="revMeaning" class="meaning"></div><p id="revSource" class="muted"></p></div>
     </div>

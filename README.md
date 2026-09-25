@@ -25,7 +25,7 @@
 | `translate.py` `tools/mac_translate.swift` | 文ごとの日本語訳（原文ごとの控え `translation_cache.json` で、同じ文は訳し直さない）。macOS 内蔵の翻訳（Translation フレームワーク、端末内で動き文は外に出ない）。初回に swiftc で `.bin/` に作る。英語・日本語の翻訳データはシステム設定 → 一般 → 言語と地域 →「翻訳言語…」で入れる |
 | `lookup.py` | 単語を引く。EJDict → 活用を戻す → 派生語を戻す（近い語）→ Free Dictionary API（英英、ネット） |
 | `vocab.py` | 単語帳（`vocab.sqlite`）。辞書で引いて「登録」した語を入れる。答えの記録（reviews）が復習の正本 |
-| `srs.py` | 復習の計算（py-fsrs、FSRS-6 の既定値、fuzz なし）。新しい語は1日20語まで |
+| `srs.py` | 復習の計算（py-fsrs、FSRS-6 の既定値、fuzz なし）。新しい語は1日20語まで。復習は「意味を思い出す」と「空欄を埋める」（例文の日本語訳を見て英文の空欄に単語を打つ。判定は `assets/shared.js`）の2つの出し方で、予定は共通 |
 | `bundle.py` | スマホへ渡す zip と、スマホから戻る記録（JSON）の形 |
 | `share.py` | 同じ Wi‑Fi のスマホへの一時的な受け渡しページ（合言葉付きのアドレス、10分で閉じる） |
 | `ai_fix_prompt.md` `tools/check_paper.py` | AI に手直しを頼むときの決まった依頼文と、手直し後の確認コマンド。画面の「AI に手直しを頼む」で「フォルダの場所 ＋ 依頼文」をコピーできる。手直し済み（`sentences.json` の `manual`）は自動の取り出し直しで上書きしない。文が変わると音声・訳を作り直す（中身の目印 `items_hash`） |

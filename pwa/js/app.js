@@ -4,7 +4,7 @@ import * as db from "./db.js";
 import { lookup } from "./lookup.js";
 import * as srs from "./srs.js";
 import { unzipStored, text } from "./zip.js";
-import { fillWords as fillShared, labelKey, refKeys, resumeIndex } from "./shared.js";
+import { fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating } from "./shared.js";
 
 const VERSION = "9";
 const $ = (id) => document.getElementById(id);
@@ -506,12 +506,22 @@ function audioRef(sentence) {
   return null;
 }
 
+// 今の論文の文の日本語訳（「空欄を埋める」モードの問題に使う）
+function sentenceJa(sentence) {
+  if (!S.paper || !sentence) return null;
+  for (const sec of S.paper.paper.sections) {
+    const k = sec.sentences.findIndex((s) => s.t === sentence);
+    if (k >= 0) return S.paper.ja?.[`${sec.id}_${k + 1}`] || null;
+  }
+  return null;
+}
+
 async function recordLookup(r, ctx) {
   if (!r.found) return;
   const now = new Date().toISOString();
   const meaning = r.entries.slice(0, 2).map((e) => e.mean).join("\n");
   const ex = ctx.sentence ? [{ sentence: ctx.sentence, section: ctx.section || null, paper_id: S.paper?.id || null,
-                                audio_ref: audioRef(ctx.sentence) }] : [];
+                                audio_ref: audioRef(ctx.sentence), query: r.query, ja: sentenceJa(ctx.sentence) }] : [];
   const w = (await db.get("words", r.headword)) || { headword: r.headword, meaning, source: r.source, first_seen: now,
                                                       examples: [], origin: "phone" };
   w.last_seen = now;
@@ -663,7 +673,77 @@ async function loadReview() {
   $("revBack").hidden = true;
   $("revButtons").hidden = true;
   $("revShow").hidden = false;
+  document.querySelectorAll("#revButtons button").forEach((b) => b.classList.remove("suggest"));
+  setupCloze(card);
 }
+
+// ---- 「空欄を埋める」モード（Mac の画面と同じ決まり。判定は shared.js）----
+function setupCloze(c) {
+  S.cz = null;
+  const ex = S.revMode === "cloze" ? pickExample(c) : null;
+  $("revCloze").hidden = !ex;
+  $("revHead").hidden = !!ex;
+  $("revExamples").hidden = !!ex;
+  if (!ex) return;
+  S.cz = { ex, hint: false, done: false };
+  $("revShow").hidden = true;
+  $("czJa").textContent = ex.ja || `（訳なし）意味: ${c.meaning.split(/\n| \/ /)[0]}`;
+  const en = $("czEn");
+  en.textContent = "";
+  const inp = document.createElement("input");
+  inp.id = "czInput";
+  inp.autocomplete = "off";
+  inp.spellcheck = false;
+  inp.setAttribute("autocapitalize", "off");
+  inp.setAttribute("enterkeyhint", "done");
+  inp.placeholder = `${ex.parts.answer.length}字`;
+  inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); checkClozeAnswer(); } };
+  en.append(ex.parts.before, inp, ex.parts.after);
+  $("czMsg").textContent = "";
+  $("czCheck").hidden = $("czHint").hidden = $("czGiveUp").hidden = false;
+}
+async function checkClozeAnswer(giveUp = false) {
+  const cz = S.cz;
+  if (!cz || cz.done) return;
+  const inp = $("czInput");
+  const typed = giveUp ? "" : inp.value;
+  const res = giveUp ? "wrong" : checkCloze(typed, cz.ex.parts.answer, S.review.card.headword);
+  cz.done = true;
+  inp.blur();
+  const ans = document.createElement("span");
+  ans.className = "cz-ans " + (res === "wrong" ? "ng" : "ok");
+  ans.textContent = cz.ex.parts.answer;
+  inp.replaceWith(ans);
+  if (typed && res !== "exact") { const you = document.createElement("span"); you.className = "cz-you"; you.textContent = typed; ans.after(you); }
+  $("czMsg").textContent = { exact: "正解", form: "正解（形が違う）", near: "惜しい（つづり）", wrong: giveUp ? "答え" : "違います" }[res];
+  $("czCheck").hidden = $("czHint").hidden = $("czGiveUp").hidden = true;
+  $("revHead").hidden = false;
+  $("revBack").hidden = false;
+  $("revButtons").hidden = false;
+  cz.suggest = suggestRating(res, cz.hint);
+  document.querySelectorAll("#revButtons button").forEach((b) => b.classList.toggle("suggest", Number(b.dataset.r) === cz.suggest));
+  if (cz.ex.audio_ref) {
+    const blob = await db.get("audio", cz.ex.audio_ref);
+    if (blob) { S.wordAudio.src = URL.createObjectURL(blob); S.wordAudio.play().catch(() => {}); }
+  }
+}
+function setRevMode(m) {
+  S.revMode = m;
+  kv("review_mode", m);
+  document.querySelectorAll("#revModes button").forEach((b) => b.classList.toggle("on", b.dataset.mode === m));
+  if (S.view === "review") loadReview();
+}
+document.querySelectorAll("#revModes button").forEach((b) => (b.onclick = () => setRevMode(b.dataset.mode)));
+$("czCheck").onclick = () => checkClozeAnswer();
+$("czGiveUp").onclick = () => checkClozeAnswer(true);
+$("czHint").onclick = () => {
+  const cz = S.cz;
+  if (!cz || cz.done) return;
+  cz.hint = true;
+  const a = cz.ex.parts.answer;
+  $("czInput").placeholder = `${a[0]}${"_".repeat(a.length - 1)}（${a.length}字）`;
+  $("czInput").focus();
+};
 $("revShow").onclick = () => { $("revBack").hidden = false; $("revButtons").hidden = false; $("revShow").hidden = true; };
 document.querySelectorAll("#revButtons button").forEach((b) => (b.onclick = async () => {
   const card = S.review?.card;
@@ -821,6 +901,8 @@ async function init() {
   $("showJa").checked = showJa;
   $("sections").classList.toggle("hide-ja", !showJa);
   $("showJa").onchange = () => { kv("show_ja", $("showJa").checked); $("sections").classList.toggle("hide-ja", !$("showJa").checked); };
+  S.revMode = (await kv("review_mode")) || "meaning";
+  document.querySelectorAll("#revModes button").forEach((b) => b.classList.toggle("on", b.dataset.mode === S.revMode));
   const sp = await kv("speed");
   if (sp) { $("speed").value = sp; $("speedVal").textContent = `${Number(sp).toFixed(2)}×`; }
   $("version").textContent = `版 ${VERSION} ・ この機器の名前 ${S.device}`;

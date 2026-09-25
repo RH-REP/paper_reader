@@ -165,7 +165,7 @@ class Vocab:
             r = con.execute("SELECT * FROM words WHERE headword = ?", (head,)).fetchone()
             if not r:
                 return None
-            ex = con.execute("SELECT sentence, section, paper_id, audio_ref FROM lookups WHERE word_id = ? "
+            ex = con.execute("SELECT sentence, section, paper_id, audio_ref, query FROM lookups WHERE word_id = ? "
                              "AND sentence IS NOT NULL ORDER BY id DESC LIMIT 3", (r["id"],)).fetchall()
             reviews = con.execute("SELECT count(*) FROM reviews WHERE headword = ?", (head,)).fetchone()[0]
         c = self._card(r)
@@ -200,7 +200,7 @@ class Vocab:
         with self._con() as con:
             words = []
             for r in con.execute("SELECT * FROM words ORDER BY first_seen"):
-                ex = con.execute("SELECT sentence, section, paper_id, audio_ref FROM lookups WHERE word_id = ? "
+                ex = con.execute("SELECT sentence, section, paper_id, audio_ref, query FROM lookups WHERE word_id = ? "
                                  "AND sentence IS NOT NULL ORDER BY id DESC LIMIT 3", (r["id"],)).fetchall()
                 words.append({"headword": r["headword"], "meaning": r["meaning"], "source": r["source"],
                               "first_seen": r["first_seen"], "examples": [dict(e) for e in ex]})

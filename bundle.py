@@ -74,6 +74,7 @@ def make_bundle(store, vocab, paper_ids: list[str], out_dir: Path, state=None) -
         for w in voc["words"]:                             # 例文の音声は今の文の並びから引き直す（文の番号は変わりうる）
             for e in w["examples"]:
                 e["audio_ref"] = _audio_ref(store, e.get("paper_id"), e.get("sentence"))
+                e["ja"] = sentence_ja(store, e.get("paper_id"), e.get("sentence"))   # 「空欄を埋める」モード用
         z.writestr("vocab.json", json.dumps(voc, ensure_ascii=False), compress_type=zipfile.ZIP_STORED)
         if state is not None:
             z.writestr("state.json", json.dumps(state.export(), ensure_ascii=False), compress_type=zipfile.ZIP_STORED)
@@ -94,6 +95,23 @@ def _audio_ref(store, pid, sentence):
         for k, s in enumerate(sec["sentences"], 1):
             if s["t"] == sentence and s["s"]:
                 return f"{pid}/{sec['id']}_{k}"
+    return None
+
+
+def sentence_ja(store, pid, sentence) -> str | None:
+    """論文の文の日本語訳（文の中身で引く。章の編集で番号がずれても引ける）。"""
+    if not (pid and sentence):
+        return None
+    try:
+        d = store.paper_dir(pid)
+        paper = store.load(pid)
+    except (KeyError, ValueError):
+        return None
+    _, ja = translate.view(d, paper)
+    for sec in paper["sections"]:
+        for k, s in enumerate(sec["sentences"], 1):
+            if s["t"] == sentence:
+                return ja.get(f"{sec['id']}_{k}")
     return None
 
 

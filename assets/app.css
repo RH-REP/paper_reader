@@ -205,3 +205,15 @@ a.fr.missing{color:inherit;text-decoration:none;cursor:text}
 .qualitybox ul{margin:4px 0 6px;padding-left:18px}.qualitybox li{margin:2px 0}
 .qualitybox .maj{color:#b0561a;font-weight:600}
 .qualitybox details{margin-top:4px}.qualitybox pre{white-space:pre-wrap;font:12.5px/1.5 -apple-system,sans-serif;margin:4px 0}
+/* 復習の「空欄を埋める」 */
+.modes{display:inline-flex;margin-left:12px;border:1px solid var(--line);border-radius:8px;overflow:hidden;vertical-align:3px}
+.modes button{border:none;border-radius:0;font-size:12.5px;padding:3px 10px;background:var(--panel)}
+.modes button.on{background:var(--accent);color:var(--accent-ink)}
+.cloze .cz-ja{font-size:17px;line-height:1.7;margin-bottom:12px}
+.cloze .cz-en{font-size:16px;line-height:1.9;color:var(--ink2)}
+.cloze input{font:inherit;font-size:16px;width:11em;padding:1px 6px;border:none;border-bottom:2px solid var(--accent);background:var(--word);color:var(--ink);border-radius:3px}
+.cloze .cz-ans{font-weight:700;padding:0 3px;border-radius:3px}
+.cloze .cz-ans.ok{background:rgba(46,139,87,.18);color:#1f7a47}.cloze .cz-ans.ng{background:rgba(192,57,43,.14);color:#b03a2e}
+.cloze .cz-you{text-decoration:line-through;color:var(--muted);margin-left:6px;font-size:14px}
+.cloze .cz-row{margin-top:12px}.cz-msg{margin-left:8px;font-weight:600}
+.rate button.suggest{outline:3px solid var(--accent);outline-offset:1px;font-weight:700}

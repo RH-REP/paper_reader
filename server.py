@@ -128,10 +128,16 @@ class App:
         return bundle.make_bundle(self.store, self.vocab, ids, self.store.root / "share", self.state)
 
     def fix_refs(self, q: dict) -> dict:
-        """復習カードの例文の音声を、今の文の並びから引き直す（取り出し方を変えると文の番号がずれるため）。"""
+        """復習カードの例文の音声を、今の文の並びから引き直す（取り出し方を変えると文の番号がずれるため）。
+        例文の日本語訳（ja）も付ける（「空欄を埋める」モードで、訳を見て英文の空欄を埋める）。"""
         for e in ((q.get("card") or {}).get("examples") or []):
             e["audio_ref"] = self.audio_ref(e.get("paper_id"), e.get("sentence"))
+            e["ja"] = self.sentence_ja(e.get("paper_id"), e.get("sentence"))
         return q
+
+    def sentence_ja(self, pid, sentence) -> str | None:
+        """論文の文の日本語訳（文の中身で引く）。"""
+        return bundle.sentence_ja(self.store, pid, sentence)
 
     def audio_ref(self, pid, sentence) -> str | None:
         """引いた文の音声（<論文id>/<音声id>）。見つからなければ None。"""
