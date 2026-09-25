@@ -6,7 +6,7 @@ import * as srs from "./srs.js";
 import { unzipStored, text } from "./zip.js";
 import { fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating } from "./shared.js";
 
-const VERSION = "9";
+const VERSION = "10";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
@@ -722,10 +722,6 @@ async function checkClozeAnswer(giveUp = false) {
   $("revButtons").hidden = false;
   cz.suggest = suggestRating(res, cz.hint);
   document.querySelectorAll("#revButtons button").forEach((b) => b.classList.toggle("suggest", Number(b.dataset.r) === cz.suggest));
-  if (cz.ex.audio_ref) {
-    const blob = await db.get("audio", cz.ex.audio_ref);
-    if (blob) { S.wordAudio.src = URL.createObjectURL(blob); S.wordAudio.play().catch(() => {}); }
-  }
 }
 function setRevMode(m) {
   S.revMode = m;

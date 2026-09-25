@@ -1320,7 +1320,6 @@ function checkClozeAnswer(giveUp = false) {
   $("revButtons").hidden = false;
   cz.suggest = suggestRating(res, cz.hint);
   document.querySelectorAll("#revButtons button").forEach((b) => b.classList.toggle("suggest", Number(b.dataset.r) === cz.suggest));
-  if (cz.ex.audio_ref) { const [pid, item] = cz.ex.audio_ref.split("/"); playOnce(`/api/papers/${pid}/audio/${item}.m4a`); }
 }
 
 function setRevMode(m) {
