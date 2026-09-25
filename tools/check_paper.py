@@ -13,6 +13,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 import figures  # noqa: E402
+import quality  # noqa: E402
 from store import normalize  # noqa: E402
 
 GARBLED = re.compile(r"[ðÞ�]|1⁄4|1⁄2")
@@ -68,6 +69,9 @@ def check(folder: Path) -> int:
                 warns.append(f"{where}: 図表の説明が混ざっている？ {t[:40]!r}")
     ferrs, fwarns = figures.check(folder)
     fst = figures.status(folder)
+    # 構造の点検（章の並び・番号の飛び・文字の重なり・見えない文字・要旨に紛れた文献など）。PDF どおりなら残してよい
+    for q in quality.inspect(paper, fst.get("items", [])):
+        warns.insert(0, f"{'[重要] ' if q['level'] == 'major' else ''}{q['where'] + ': ' if q['where'] else ''}{q['msg']}")
     print(f"図・表・数式 {len(fst.get('items', []))} 件" + ("（AI 手直し済み）" if fst.get("manual") else "（自動のまま。manual が無い）"))
     for it in fst.get("items", []):
         print(f"  p.{it.get('page')} [{it.get('kind')}] {it.get('label') or '-'}  {it.get('file')}")

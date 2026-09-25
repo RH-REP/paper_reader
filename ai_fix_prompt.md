@@ -4,29 +4,34 @@ PDF から自動で取り出した「章と文」（sentences.json）に誤り�
 ## フォルダの中身
 - original.pdf … 元の論文。見るだけで変更しない
 - sentences.json … 自動で取り出した章と文。**これを直す**
-- figures.json、figures/ … 図・表・数式の画像と一覧。自動では PDF に埋め込まれた画像だけを切り抜いてある。**これも直す**（下の「図・表・数式」）
+- figures.json、figures/ … 図・表・数式の画像と一覧。自動ではキャプションの近くの画像・線と、番号付きの式の行を切り抜いてある（抜け・範囲の誤りがある場合がある）。**これも直す**（下の「図・表・数式」）
 - meta.json、audio/、export/、translation.json … 触らない（app が作り直す。訳もこちらで作り直すので直さない）
 
 ## 手順
 1. 最初に sentences.json を sentences.orig.json に、figures.json を figures.orig.json にコピーして残す（既にあれば上書きしない）
 2. original.pdf を全ページ読み、sentences.json と突き合わせる。文字が選べない（画像だけの）ページは OCR で読む（`tesseract` が使えれば使い、無ければ画像として読む）
-3. 下の「直す観点」と「図・表・数式」のとおりに直して、sentences.json と figures.json に書き戻す
+3. 下の「直す観点」と「図・表・数式」のとおりに直して、sentences.json と figures.json に書き戻す。
+   直している途中の形は作業用の別のファイルで組み立て、sentences.json には最後に1回だけ書く（書くたびに app が音声を作り直し始めるため）
 4. 確認のコマンドを実行し、エラーが無くなるまで直す（警告は、PDF どおりなら残してよい）:
    {check}
 5. 最後に、直した内容を箇条書きで報告する（章の数・文の数の前後、直した種類ごとの件数と例）
 
 ## 直す観点
 1. **章分け**: PDF の見出しどおりに sections を分ける。見出しの文言と番号は PDF のまま（例 "2.1 Pupil Size"、"1. Introduction"）。level は 1 = 章、2 = 節、3 = その下。最初の見出しより前の要旨は title "Abstract"、kind "front"
-2. **後付け**: References / Acknowledgments / Funding / Author contributions / Data availability / Conflict of interest / Appendix などから後ろは kind "back"。本文は kind "body"
+2. **後付け**: References / Acknowledgments / Funding / Author contributions / Data availability / Conflict of interest などから後ろは kind "back"。本文は kind "body"。
+   Appendix は、本文から「Appendix A」などと参照されて読み物になっているなら kind "body"、そうでなければ "back"。
+   参考文献（References）は、1件を1要素にして s は ""（読み上げない）。PDF で要旨の直後などにあっても、sections の最後に置く
 3. **単語の区切り**: 空白の抜け（limitedbysaturation → limited by saturation）、行末ハイフンの残り・誤結合（micro- electromechanical、deform- able）、合字の化け（ﬁ → fi）を直す。つづりや言い回しそのものは変えない
 4. **文の切れ目**: sentences の1要素は1文。Eq. / Fig. / Ref. / et al. / e.g. / i.e. / 「(b) and (c)」で切らない。2文が1つにつながっていたら分ける
 5. **混ざったものを外す**: 図表の説明（"Fig. 3. …"）、表の中身、ページのヘッダー・フッター・ページ番号、著者名・所属、受付日、著作権表示、脚注番号の切れ端は文から外す
 6. **抜けを補う**: PDF にあるのに抜けている本文（取り出し漏れ・画像だけのページ）は補う。段組みの読む順番が入れ替わっていたら直す
 7. **数式**: 画面に出す t は PDF の見た目に近い形で残してよい。読み上げる s では、式を "(equation)" に置き換え、文字化け（ð, Þ, 1⁄4, � など）を s に残さない
-8. **読み上げる文 s**: t から、年を含む括弧の引用（Smith et al., 2020）と [12] 型の引用を除いたもの（式は 7 のとおり）。s を空文字 "" にすると、その文は読み上げない（表の切れ端などに使う）
+8. **読み上げる文 s**: t から、年を含む括弧の引用（Smith et al., 2020）と [12] 型の引用、上付きの引用番号を除いたもの（式は 7 のとおり）。
+   ただし「in [12]」「see [3]」のように引用が文の語として使われ、除くと文が壊れるときは「reference 12」と読ませる。
+   行内の1文字の変数（λ、r₀）は言葉にしてよい（lambda、r zero）。s を空文字 "" にすると、その文は読み上げない（表の切れ端などに使う）
 
 ## 図・表・数式
-自動の抜き出しは、PDF に埋め込まれた画像の範囲だけ。線で描かれたグラフ・表・数式は抜けていることがある。PDF の全ページを見て、次のとおり直す。
+自動の抜き出しは、キャプションの近くの画像・線と、右端に番号のある式の行だけ。抜け・範囲の誤り（図の一部しか入っていない、隣の文まで入っている）がある場合がある。PDF の全ページを見て、次のとおり直す。
 
 1. **抜けを足す**: 図（Fig.）・表（Table）・独立した行の数式（番号付きの式）で、figures.json に無いものを足す。PDF のその範囲を画像にして figures/ に保存する。画像にするには次のように書く（範囲はポイント単位。キャプションは含めず、図・表・式の本体だけを囲む）:
    ```

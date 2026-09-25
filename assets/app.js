@@ -132,6 +132,8 @@ async function openPaper(id) {
   renderResume();
   renderTerms();
   watchTerms();
+  renderQuality();
+  if (p.ai_fix?.state === "running") watchAiFix();
 }
 
 function renderMeta() {
@@ -408,6 +410,91 @@ function playAllOrResume(fromTop = false) {
   if (fromTop || !pos || !pos.total || pos.done >= pos.total) return play(items);
   const r = resumeIndex(items, pos);
   play(items, r.index, { at: r.exact ? Math.max(0, r.at - 1) : 0 });   // 1秒手前から
+}
+
+// ---- 自動の取り出しの点検と、AI の手直し（この Mac の Claude Code）----
+const elapsed = (from) => { const s = Math.max(0, Math.round((Date.now() - new Date(from).getTime()) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+
+function renderQuality() {
+  const p = S.paper, q = p.quality || { major: 0, minor: 0, top: [] }, a = p.ai_fix || { state: "none" };
+  const box = $("qualityBox");
+  box.className = "qualitybox";
+  box.textContent = "";
+  if (a.state === "running") {
+    box.classList.add("run");
+    box.innerHTML = `<b>AI が手直ししています</b>（経過 ${elapsed(a.started_at)}・操作 ${a.tools} 回）<br><span class="muted"></span>
+      <div><button class="small" id="aiStop">止める</button></div>`;
+    box.querySelector(".muted").textContent = a.last || "";
+    box.querySelector("#aiStop").onclick = async () => { await post(`/api/papers/${p.id}/ai_fix`, { action: "stop" }).catch(() => {}); };
+    box.hidden = false;
+    return;
+  }
+  const justDone = ["done", "error", "stopped"].includes(a.state) && S.aiShown !== a.finished_at;
+  if (justDone || (["done", "error"].includes(a.state) && S.showAiResult)) {
+    box.classList.add(a.state === "done" ? "ok" : "");
+    const title = { done: "AI の手直しが終わりました", error: "AI の手直しが途中で止まりました", stopped: "AI の手直しを止めました" }[a.state];
+    box.innerHTML = `<b></b> <span class="muted"></span><details><summary>AI の報告</summary><pre></pre></details>
+      <div><button class="small" id="aiOk">閉じる</button></div>`;
+    box.querySelector("b").textContent = title;
+    box.querySelector(".muted").textContent = `（${(a.finished_at || "").slice(11, 16)}・操作 ${a.tools} 回${a.cost_usd != null ? `・約 $${Number(a.cost_usd).toFixed(2)}` : ""}）`;
+    box.querySelector("pre").textContent = a.result || "（報告なし。data/papers/<id>/ai_fix.log を見てください）";
+    box.querySelector("#aiOk").onclick = () => { S.aiShown = a.finished_at; S.showAiResult = false; renderQuality(); };
+    box.hidden = false;
+    return;
+  }
+  if (p.manual || !q.recommend) { box.hidden = true; return; }
+  box.innerHTML = `<b>自動の取り出しに気になる所があります</b>（重要 ${q.major}・軽い ${q.minor}）。AI に手直しさせると直ります。<ul></ul><div></div>`;
+  for (const i of q.top) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="${i.level === "major" ? "maj" : ""}"></span>`;
+    li.firstChild.textContent = (i.where ? `${i.where}: ` : "") + i.msg;
+    box.querySelector("ul").appendChild(li);
+  }
+  const row = box.querySelector("div");
+  if (a.available) {
+    const b = document.createElement("button");
+    b.className = "primary";
+    b.textContent = "この Mac の Claude Code に手直しを頼む";
+    b.title = "claude -p を裏で動かし、元の PDF を見ながら章と文・図を直させます（数分〜十数分）";
+    b.onclick = startAiFix;
+    row.appendChild(b);
+  }
+  const c = document.createElement("button");
+  c.className = "small";
+  c.textContent = "プロンプトをコピーして自分で頼む";
+  c.onclick = () => $("aiBtn").click();
+  row.append(" ", c);
+  box.hidden = false;
+}
+
+async function startAiFix() {
+  if (!confirm("この論文の PDF と取り出した文を Claude（Anthropic）に送り、手直しさせます。\n"
+    + "Claude Code の利用料がかかります（論文1本で数ドル程度）。終わるまで数分〜十数分かかります。\n\n始めますか？")) return;
+  try {
+    const st = await post(`/api/papers/${S.paper.id}/ai_fix`, { action: "start" });
+    S.paper.ai_fix = { ...st, available: true };
+  } catch (e) { alert(`始められませんでした: ${e.message}`); return; }
+  renderQuality();
+  watchAiFix();
+}
+
+function watchAiFix() {
+  clearInterval(S.aiPoll);
+  const id = S.paper.id;
+  S.aiPoll = setInterval(async () => {
+    if (!S.paper || S.paper.id !== id) return clearInterval(S.aiPoll);
+    const st = await api(`/api/papers/${id}/ai_fix`).catch(() => null);
+    if (!st) return;
+    S.paper.ai_fix = st;
+    if (st.state !== "running") {
+      clearInterval(S.aiPoll);
+      S.showAiResult = true;
+      if (!S.playing) { await openPaper(id); S.showAiResult = true; renderQuality(); }   // 手直しを画面に反映（音声・訳は変わった文だけ作り直し）
+      else renderQuality();
+      return;
+    }
+    renderQuality();
+  }, 2000);
 }
 
 // ---- 専門用語 ----

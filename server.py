@@ -16,6 +16,8 @@
   POST /api/papers/<id>/audio           音声を今の声・速さで作り直す
   POST /api/papers/<id>/translate       文ごとの日本語訳を作り直す（macOS 内蔵の翻訳。端末内）
   GET  /api/papers/<id>/ai_prompt       AI に手直しを頼むプロンプト（フォルダの場所 ＋ ai_fix_prompt.md）
+  GET  /api/papers/<id>/ai_fix          この Mac の Claude Code に頼んだ手直しの状態（available = claude があるか）
+  POST /api/papers/<id>/ai_fix          {"action": "start"|"stop"} 手直しを頼む／止める（1本ずつ）
   GET  /api/papers/<id>/figures         図・表・数式の一覧（figures.json）
   GET  /api/papers/<id>/glossary        専門用語の一覧（glossary.json。辞書に無い語・略語と元の語・よく出る句と訳）
   GET  /api/papers/<id>/figures/<file>.png  図・表・数式の画像
@@ -65,11 +67,13 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import aifix  # noqa: E402
 import audio  # noqa: E402
 import bundle  # noqa: E402
 import figures  # noqa: E402
 import glossary  # noqa: E402
 import pronounce  # noqa: E402
+import quality  # noqa: E402
 import translate  # noqa: E402
 from lookup import Dictionary  # noqa: E402
 from share import ShareServer  # noqa: E402
@@ -103,6 +107,7 @@ class App:
         self.dict = Dictionary(self.cfg["data_root"], online=self.cfg["online_dict"])
         self.localdict = Dictionary(self.cfg["data_root"], online=False)    # 用語集づくり用（ネットを使わない）
         self._gloss = {"sig": None, "index": {}}
+        self.aifix = aifix.AiFixer()
         self.vocab = Vocab(self.cfg["data_root"])
         self.state = State(self.cfg["data_root"])
         audio.PRONOUNCER = self.pron = pronounce.Pronouncer(self.store.root / "pronunciations.json")
@@ -179,6 +184,39 @@ class App:
         if len(out) == 2:
             out.append("（印を付けた文はありません）")
         return "\n".join(out).rstrip() + "\n"
+
+    def python(self) -> str:
+        py = HERE / ".venv" / "bin" / "python"
+        return str(py if py.exists() else "python3")
+
+    def ai_prompt(self, pid: str) -> tuple[Path, str]:
+        """AI に手直しを頼む依頼文（フォルダの場所 ＋ ai_fix_prompt.md）。"""
+        d = self.store.paper_dir(pid)
+        py = self.python()
+        check = f"{shlex.quote(py)} {shlex.quote(str(HERE / 'tools' / 'check_paper.py'))} {shlex.quote(str(d))}"
+        fixed = (HERE / "ai_fix_prompt.md").read_text(encoding="utf-8").replace("{check}", check) \
+            .replace("{python}", shlex.quote(py)).replace("{folder}", str(d))
+        return d, f"{d}\n\n{fixed}"
+
+    def ai_available(self) -> bool:
+        """この Mac の Claude Code に頼めるか（claude があり、この app の .venv がある）。"""
+        return bool(aifix.find_cli()) and (HERE / ".venv" / "bin" / "python").exists()
+
+    def start_ai_fix(self, pid: str) -> dict:
+        d, prompt = self.ai_prompt(pid)
+
+        def done(st):                                # 手直しが終わったら音声・訳・用語集を今の文で作り直す
+            try:
+                self.store.load(pid)
+                self.start_audio(pid)
+                self.start_translate(pid)
+                self.start_glossary(pid)
+            except (ValueError, KeyError) as e:
+                st["result"] = f"{st.get('result', '')}\n（app が読めない: {e}）"
+        return self.aifix.start(pid, d, prompt, self.python(), done)
+
+    def quality(self, pid: str, d: Path, paper: dict) -> dict:
+        return quality.summary(quality.inspect(paper, figures.status(d).get("items", []) if (d / "original.pdf").exists() else None))
 
     def preview(self, text: str) -> dict:
         """読み方の試聴。直した読み（spoken）と、その音声のファイル名。data/preview/ に最近の 40 本だけ残す。"""
@@ -381,7 +419,9 @@ class Handler(SimpleHTTPRequestHandler):
         tr, ja = translate.view(d, paper)
         au = self._audio_view(d, paper)
         gl = glossary.status(d)
-        return {**paper, "audio": au, "ja": ja, "translation": tr, "has_pdf": (d / "original.pdf").exists(),
+        return {**paper, "quality": self.app.quality(pid, d, paper),
+                "ai_fix": {**aifix.status(d), "available": self.app.ai_available(), "busy": self.app.aifix.running()},
+                "audio": au, "ja": ja, "translation": tr, "has_pdf": (d / "original.pdf").exists(),
                 "glossary": {"state": gl.get("state"), "current": glossary.is_current(d, paper), "terms": gl.get("terms", [])},
                 "marks": self.app.state.marks(pid), "position": self.app.state.positions().get(pid)}
 
@@ -444,15 +484,16 @@ class Handler(SimpleHTTPRequestHandler):
             return self._file(d / "figures" / m.group(2), "image/png") if d else self.send_error(HTTPStatus.NOT_FOUND)
         m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/ai_prompt", path)
         if m:
+            if not self._paper_dir(m.group(1)):
+                return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            d, prompt = app.ai_prompt(m.group(1))
+            return self._json({"folder": str(d), "prompt": prompt})
+        m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/ai_fix", path)
+        if m:
             d = self._paper_dir(m.group(1))
             if not d:
                 return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
-            py = HERE / ".venv" / "bin" / "python"
-            check = f"{shlex.quote(str(py if py.exists() else 'python3'))} {shlex.quote(str(HERE / 'tools' / 'check_paper.py'))} {shlex.quote(str(d))}"
-            pyq = shlex.quote(str(py if py.exists() else "python3"))
-            fixed = (HERE / "ai_fix_prompt.md").read_text(encoding="utf-8").replace("{check}", check) \
-                .replace("{python}", pyq).replace("{folder}", str(d))
-            return self._json({"folder": str(d), "prompt": f"{d}\n\n{fixed}"})
+            return self._json({**aifix.status(d), "available": app.ai_available(), "busy": app.aifix.running()})
         m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/glossary", path)
         if m:
             d = self._paper_dir(m.group(1))
@@ -620,6 +661,20 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json(app.preview(t))
             except Exception as e:  # say / afconvert が無いなど
                 return self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/ai_fix", path)
+        if m:
+            d = self._paper_dir(m.group(1))
+            if not d:
+                return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            act = self._body_json().get("action")
+            try:
+                if act == "start":
+                    return self._json(app.start_ai_fix(m.group(1)))
+                if act == "stop":
+                    return self._json({"stopped": app.aifix.stop(m.group(1), d)})
+            except RuntimeError as e:
+                return self._json({"error": str(e)}, HTTPStatus.CONFLICT)
+            return self._json({"error": "action は start か stop"}, HTTPStatus.BAD_REQUEST)
         if path == "/api/position":
             b = self._body_json()
             if not self._paper_dir(str(b.get("paper_id", ""))):
