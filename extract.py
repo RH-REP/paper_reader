@@ -475,7 +475,9 @@ def build_paper(doc, on_page=None) -> dict:
                 cur["_parts"].append(rest)
             continue
         if not heading and in_abs and cur["kind"] == "front":
-            if not ln.ocr and ln.size >= body - 2.1 and not FRONT_NOISE.fullmatch(ln.text.strip()):
+            if re.match(r"^(keywords?|index terms|ocis codes?)\b", ln.text, re.I):
+                in_abs = "end"                         # キーワードの行（2行目に続くことがある）から先は要旨に入れない
+            if in_abs is True and not ln.ocr and ln.size >= body - 2.1 and not FRONT_NOISE.fullmatch(ln.text.strip()):
                 cur["_parts"].append(FRONT_NOISE.sub("", ln.text).strip() or ln.text)
             continue
         if not heading and cur["kind"] == "front" and not ln.ocr and ln.size >= body - 2.1:
