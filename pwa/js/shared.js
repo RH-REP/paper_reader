@@ -258,3 +258,90 @@ export function levelAdvice(history, level) {
   const rate = recent.reduce((s, h) => s + h.score, 0) / recent.length;
   return { rate, n: recent.length, advice: rate > 0.9 && level < 5 ? "up" : rate < 0.5 && level > 1 ? "down" : null };
 }
+
+// ---- 図を大きく開いたときの拡大・移動（ホイール・トラックパッドのピンチ・2本指のピンチ・ダブルクリック／ダブルタップ・ドラッグ）----
+// stage: 画像を入れる枠（overflow: hidden）、img: 画像。返り値の reset() で画面に収まる大きさに戻す。scale() で今の倍率
+export function attachZoom(stage, img, { onSwipe } = {}) {
+  let s = 1, x = 0, y = 0;
+  const ptrs = new Map();
+  let start = null, lastTap = 0, moved = false;
+  const apply = () => { img.style.transform = `translate(${x}px, ${y}px) scale(${s})`; stage.classList.toggle("zoomed", s > 1.01); };
+  const clamp = () => {
+    if (s <= 1.01) { s = 1; x = 0; y = 0; return; }
+    const r = stage.getBoundingClientRect(), w = img.offsetWidth * s, h = img.offsetHeight * s;
+    const mx = Math.max(0, (w - r.width) / 2), my = Math.max(0, (h - r.height) / 2);
+    x = Math.min(mx, Math.max(-mx, x));
+    y = Math.min(my, Math.max(-my, y));
+  };
+  const zoomAt = (factor, cx, cy) => {                // (cx, cy) の点を動かさずに拡大・縮小
+    const r = stage.getBoundingClientRect();
+    const px = cx - (r.left + r.width / 2), py = cy - (r.top + r.height / 2);
+    const ns = Math.min(8, Math.max(1, s * factor));
+    x = px - (px - x) * (ns / s);
+    y = py - (py - y) * (ns / s);
+    s = ns;
+    clamp();
+    apply();
+  };
+  stage.addEventListener("wheel", (e) => { e.preventDefault(); zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0025)), e.clientX, e.clientY); }, { passive: false });
+  stage.addEventListener("dblclick", (e) => { s > 1.01 ? reset() : zoomAt(2.5, e.clientX, e.clientY); });
+  stage.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("button, a")) return;       // 前・次のボタンは押せるままにする
+    stage.setPointerCapture(e.pointerId);
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    moved = false;
+    start = { x: e.clientX, y: e.clientY, t: Date.now() };
+  });
+  stage.addEventListener("pointermove", (e) => {
+    if (!ptrs.has(e.pointerId)) return;
+    const prev = ptrs.get(e.pointerId);
+    if (ptrs.size === 2) {                          // 2本指のピンチ
+      const [a, b] = [...ptrs.values()];
+      const d0 = Math.hypot(a.x - b.x, a.y - b.y);
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const [c, d] = [...ptrs.values()];
+      const d1 = Math.hypot(c.x - d.x, c.y - d.y);
+      if (d0 > 0) zoomAt(d1 / d0, (c.x + d.x) / 2, (c.y + d.y) / 2);
+      moved = true;
+      return;
+    }
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (Math.abs(e.clientX - start.x) + Math.abs(e.clientY - start.y) > 6) moved = true;
+    if (s > 1.01) { x += e.clientX - prev.x; y += e.clientY - prev.y; clamp(); apply(); }
+  });
+  const up = (e) => {
+    if (!ptrs.has(e.pointerId)) return;
+    ptrs.delete(e.pointerId);
+    if (ptrs.size || !start) return;
+    const dx = e.clientX - start.x, dy = e.clientY - start.y;
+    if (s <= 1.01 && moved && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5 && onSwipe) onSwipe(dx < 0 ? 1 : -1);   // 等倍のときだけ、はらって前後へ
+    if (!moved && e.pointerType === "touch") {      // ダブルタップ
+      if (Date.now() - lastTap < 300) { s > 1.01 ? reset() : zoomAt(2.5, e.clientX, e.clientY); lastTap = 0; }
+      else lastTap = Date.now();
+    }
+    start = null;
+  };
+  stage.addEventListener("pointerup", up);
+  stage.addEventListener("pointercancel", up);
+  function reset() { s = 1; x = 0; y = 0; apply(); }
+  return { reset, scale: () => s, zoomBy: (f) => { const r = stage.getBoundingClientRect(); zoomAt(f, r.left + r.width / 2, r.top + r.height / 2); } };
+}
+
+// ---- 理解クイズ（quiz.json。章の title で章と結び付ける）----
+// その節を含む章（段 1）の title
+export function chapterTitle(sections, sec) {
+  let i = sections.indexOf(sec);
+  while (i > 0 && sections[i].level > 1) i--;
+  return i >= 0 ? sections[i].title : null;
+}
+// 本文の文（t）→ 音声 id（"<sec>_<k>"）。無ければ null
+export function findSentenceId(sections, t) {
+  for (const sec of sections) {
+    const k = sec.sentences.findIndex((x) => x.t === t);
+    if (k >= 0) return `${sec.id}_${k + 1}`;
+  }
+  return null;
+}
+export function quizChapter(quiz, title) {
+  return (quiz?.chapters || []).find((c) => c.chapter === title && (c.questions || []).length) || null;
+}

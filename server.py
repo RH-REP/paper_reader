@@ -17,7 +17,8 @@
   POST /api/papers/<id>/translate       文ごとの日本語訳を作り直す（macOS 内蔵の翻訳。端末内）
   GET  /api/papers/<id>/ai_prompt       AI に手直しを頼むプロンプト（フォルダの場所 ＋ ai_fix_prompt.md）
   GET  /api/papers/<id>/ai_fix          この Mac の Claude Code に頼んだ手直しの状態（available = claude があるか）
-  POST /api/papers/<id>/ai_fix          {"action": "start"|"stop"} 手直しを頼む／止める（1本ずつ）
+  POST /api/papers/<id>/ai_fix          {"action": "start"|"stop", "task": "fix"|"quiz"} 手直し・理解クイズづくりを頼む／止める（1本ずつ）
+  GET  /api/papers/<id>/quiz            章ごとの理解クイズ（quiz.json）
   GET  /api/papers/<id>/figures         図・表・数式の一覧（figures.json）
   GET  /api/papers/<id>/glossary        専門用語の一覧（glossary.json。辞書に無い語・略語と元の語・よく出る句と訳）
   GET  /api/papers/<id>/figures/<file>.png  図・表・数式の画像
@@ -216,8 +217,20 @@ class App:
         """この Mac の Claude Code に頼めるか（claude があり、この app の .venv がある）。"""
         return bool(aifix.find_cli()) and (HERE / ".venv" / "bin" / "python").exists()
 
-    def start_ai_fix(self, pid: str) -> dict:
-        d, prompt = self.ai_prompt(pid)
+    def quiz_prompt(self, pid: str) -> tuple[Path, str]:
+        """理解クイズだけを作らせる依頼文。決まりは ai_fix_prompt.md の「理解クイズ」の節をそのまま使う（1か所で直せるように）。"""
+        d, full = self.ai_prompt(pid)
+        m = re.search(r"^## 理解クイズ\n.*?(?=^## )", full, re.S | re.M)
+        check = re.search(r"^\s+(\S*python\S*\s+\S*check_paper\.py\s+\S+)\s*$", full, re.M)
+        body = (f"{d}\n\n上のフォルダは、英語論文の読み上げ app「paper_reader」が取り込んだ論文1本です。"
+                "sentences.json（章と文）を読み、**理解クイズ（quiz.json）だけ**を作ってください。"
+                "sentences.json・figures.json などほかのファイルは変えないでください。\n\n"
+                + (m.group(0) if m else "") +
+                f"\n作ったら、次のコマンドでエラーが無いことを確かめる:\n   {check.group(1) if check else ''}\n")
+        return d, body
+
+    def start_ai_fix(self, pid: str, task: str = "fix") -> dict:
+        d, prompt = self.quiz_prompt(pid) if task == "quiz" else self.ai_prompt(pid)
 
         def done(st):                                # 手直しが終わったら音声・訳・用語集を今の文で作り直す
             try:
@@ -227,7 +240,15 @@ class App:
                 self.start_glossary(pid)
             except (ValueError, KeyError) as e:
                 st["result"] = f"{st.get('result', '')}\n（app が読めない: {e}）"
-        return self.aifix.start(pid, d, prompt, self.python(), done)
+        return self.aifix.start(pid, d, prompt, self.python(), done, task)
+
+    @staticmethod
+    def quiz_count(d: Path) -> dict:
+        try:
+            q = json.loads((d / "quiz.json").read_text(encoding="utf-8"))
+            return {"chapters": len(q.get("chapters", [])), "questions": sum(len(c.get("questions", [])) for c in q.get("chapters", []))}
+        except (OSError, ValueError):
+            return {"chapters": 0, "questions": 0}
 
     def quality(self, pid: str, d: Path, paper: dict) -> dict:
         return quality.summary(quality.inspect(paper, figures.status(d).get("items", []) if (d / "original.pdf").exists() else None))
@@ -434,6 +455,7 @@ class Handler(SimpleHTTPRequestHandler):
         au = self._audio_view(d, paper)
         gl = glossary.status(d)
         return {**paper, "quality": self.app.quality(pid, d, paper),
+                "quiz": self.app.quiz_count(d),
                 "ai_fix": {**aifix.status(d), "available": self.app.ai_available(), "busy": self.app.aifix.running()},
                 "audio": au, "ja": ja, "translation": tr, "has_pdf": (d / "original.pdf").exists(),
                 "glossary": {"state": gl.get("state"), "current": glossary.is_current(d, paper), "terms": gl.get("terms", [])},
@@ -509,6 +531,16 @@ class Handler(SimpleHTTPRequestHandler):
             if not d:
                 return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return self._json({**aifix.status(d), "available": app.ai_available(), "busy": app.aifix.running()})
+        m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/quiz", path)
+        if m:
+            d = self._paper_dir(m.group(1))
+            if not d:
+                return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            qp = d / "quiz.json"
+            try:
+                return self._json(json.loads(qp.read_text(encoding="utf-8")) if qp.exists() else {"chapters": []})
+            except ValueError:
+                return self._json({"chapters": [], "error": "quiz.json が読めない"})
         m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/glossary", path)
         if m:
             d = self._paper_dir(m.group(1))
@@ -681,10 +713,12 @@ class Handler(SimpleHTTPRequestHandler):
             d = self._paper_dir(m.group(1))
             if not d:
                 return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
-            act = self._body_json().get("action")
+            self._body_json_cache = self._body_json()
+            act = self._body_json_cache.get("action")
             try:
                 if act == "start":
-                    return self._json(app.start_ai_fix(m.group(1)))
+                    task = self._body_json_cache.get("task") if hasattr(self, "_body_json_cache") else None
+                    return self._json(app.start_ai_fix(m.group(1), task if task in ("fix", "quiz") else "fix"))
                 if act == "stop":
                     return self._json({"stopped": app.aifix.stop(m.group(1), d)})
             except RuntimeError as e:

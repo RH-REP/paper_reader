@@ -27,8 +27,9 @@
       <p class="row"><button id="playAll" class="primary">▶ 全体を読む</button>
         <button id="playTop" class="btn" hidden>最初から</button>
         <label class="muted"><input type="checkbox" id="skipBack" checked> 後付けを飛ばす</label>
+        <label class="muted"><input type="checkbox" id="quizAtEnd"> 章の終わりにクイズ</label>
         <label class="muted"><input type="checkbox" id="showJa" checked> 訳</label></p>
-      <p><button id="figBtn" class="btn" hidden>図・表・数式</button> <button id="marksBtn" class="btn" hidden>★ 印</button> <button id="dcOpen" class="btn">✎ ディクテーション</button></p>
+      <p><button id="figBtn" class="btn" hidden>図・表・数式</button> <button id="marksBtn" class="btn" hidden>★ 印</button> <button id="dcOpen" class="btn">✎ ディクテーション</button> <button id="quizBtn" class="btn" hidden>？ 理解クイズ</button></p>
       <div id="figPanel" hidden><div id="figGrid" class="figgrid"></div></div>
       <div id="marksPanel" hidden><p class="muted small">印は Mac に戻すと、Mac で Markdown に書き出せます。押すとその文から再生します。</p><ol id="marksList" class="markslist"></ol></div>
       <ol id="sections" class="sections"></ol>
@@ -141,6 +142,18 @@
   </section>
 </main>
 
+<!-- 理解クイズ（章ごと。Mac の AI が作った quiz.json）-->
+<div id="quizPanel" class="dictpanel" hidden>
+  <div class="dc-head"><b>理解クイズ</b> <button id="qzClose" class="btn">閉じる</button></div>
+  <div class="dc-opts"><select id="qzChapter"></select></div>
+  <div id="qzWhere" class="muted small"></div>
+  <div id="qzQ" class="qz-q"></div>
+  <div id="qzChoices" class="qz-choices"></div>
+  <div id="qzAfter" class="qz-after" hidden></div>
+  <div class="dc-actions"><button id="qzNext" class="primary" hidden>次の問題</button><button id="qzResume" class="primary" hidden>▶ 続きを聞く</button>
+    <button id="qzAgain" class="btn" hidden>もう一度</button> <span id="qzStat" class="muted small"></span></div>
+</div>
+
 <!-- ディクテーション（文を聞いて、ランダムに空けた語を打つ）-->
 <div id="dictPanel" class="dictpanel" hidden>
   <div class="dc-head"><b>ディクテーション</b> <button id="dcClose" class="btn">閉じる</button></div>
@@ -154,7 +167,7 @@
   <div id="dcText" class="dc-text"></div>
   <div id="dcResult" class="dc-result" hidden></div>
   <div class="dc-actions"><button id="dcCheck" class="primary">答え合わせ</button><button id="dcNext" class="primary" hidden>次へ</button>
-    <button id="dcSkip" class="btn">飛ばす</button> <span id="dcStat" class="muted small"></span></div>
+    <button id="dcPrev" class="btn">◀ 前の文</button> <button id="dcSkip" class="btn">次の文 ▶</button> <span id="dcStat" class="muted small"></span></div>
 </div>
 
 <!-- 再生バー -->
@@ -165,7 +178,7 @@
     <input type="range" id="progress" min="0" max="1000" step="1" value="0" aria-label="再生位置（動かすとその位置へ）">
     <span id="tTot" class="t">0:00</span>
   </div>
-  <div class="nowrow"><button id="nowMark" class="mk" title="この文に印">☆</button><p id="nowText" class="now"></p>
+  <div class="nowrow"><button id="nowMark" class="mk" title="この文に印">☆</button><button id="nowDict" class="mk" title="この文からディクテーション">✎</button><p id="nowText" class="now"></p>
     <img id="nowFig" class="nowfig" hidden alt=""></div>
   <div id="nowJaBox" class="nowja"><button id="jaBtn" class="btn">押して翻訳を表示</button><p id="nowJa" hidden></p></div>
   <div class="prow ctrl">
@@ -187,7 +200,8 @@
 <div id="lightbox" class="lightbox" hidden>
   <div class="lb-bar"><b id="lbLabel"></b> <span id="lbCount"></span>
     <button id="lbClose" class="icon close">×</button></div>
-  <img id="lbImg" alt="">
+  <div id="lbStage" class="lb-stage"><img id="lbImg" alt="" draggable="false"></div>
+  <p class="lb-hint">2本指で広げる・ダブルタップで拡大、ドラッグで動かす</p>
   <p id="lbCaption" class="lb-cap"></p>
   <div class="lb-row"><button id="lbPrev" class="btn">‹ 前</button>
     <a id="lbOpen" class="btn" target="_blank" rel="noopener">画像を開く・保存</a>

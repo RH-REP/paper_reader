@@ -4,10 +4,10 @@ import * as db from "./db.js";
 import { lookup } from "./lookup.js";
 import * as srs from "./srs.js";
 import { unzipStored, text } from "./zip.js";
-import { fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating,
+import { chapterTitle, findSentenceId, quizChapter, attachZoom, fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating,
          tokenize, pickBlanks, gradeWord, gradeSentence, levelAdvice } from "./shared.js";
 
-const VERSION = "13";
+const VERSION = "14";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
@@ -97,6 +97,7 @@ async function openPaper(id) {
   S.position = await db.get("positions", id);
   renderResume();
   await renderFigures(p);
+  renderQuizBtn();
   const ol = $("sections");
   ol.innerHTML = "";
   for (const sec of p.paper.sections) {
@@ -134,6 +135,11 @@ async function openPaper(id) {
           b.title = "この文だけ再生";
           b.onclick = () => play([sentenceItem(sec, k)]);
           x.appendChild(b);
+          const dcb = document.createElement("button");
+          dcb.className = "dc1";
+          dcb.textContent = "✎";
+          dcb.onclick = () => openDict({ secId: sec.id, id: `${sec.id}_${k + 1}` });
+          x.appendChild(dcb);
         }
         const t = document.createElement("span");
         fillWords(t, s.t);
@@ -193,6 +199,7 @@ function openLightbox(i) {
   if (!n) return;
   S.lb = (i + n) % n;
   const f = S.figs[S.lb];
+  LBZ?.reset();
   $("lbImg").src = f.url;
   $("lbLabel").textContent = f.label || "画像";
   $("lbCount").textContent = `${S.lb + 1} / ${n} ・ p.${f.page}`;
@@ -204,15 +211,8 @@ function openLightbox(i) {
 $("lbPrev").onclick = () => openLightbox(S.lb - 1);
 $("lbNext").onclick = () => openLightbox(S.lb + 1);
 $("lbClose").onclick = () => { $("lightbox").hidden = true; };
-// 左右にはらって前後の図へ
-let touchX = null;
-$("lightbox").addEventListener("touchstart", (e) => { touchX = e.touches[0].clientX; }, { passive: true });
-$("lightbox").addEventListener("touchend", (e) => {
-  if (touchX === null) return;
-  const dx = e.changedTouches[0].clientX - touchX;
-  touchX = null;
-  if (Math.abs(dx) > 50) openLightbox(S.lb + (dx < 0 ? 1 : -1));
-});
+// 拡大・移動（2本指で広げる・ダブルタップ・ドラッグ）。等倍のときは左右にはらって前後の図へ
+const LBZ = attachZoom($("lbStage"), $("lbImg"), { onSwipe: (d) => openLightbox(S.lb + d) });
 
 $("backToList").onclick = () => { $("paperPick").hidden = false; $("paperView").hidden = true; };
 
@@ -382,7 +382,119 @@ function halt() {
   if ("speechSynthesis" in window) speechSynthesis.cancel();
 }
 
-function advance(g) { if (g !== S.gen || S.paused) return; S.pos++; speakCurrent({ keep: true }); }
+function advance(g) {
+  if (g !== S.gen || S.paused) return;
+  // 「章の終わりにクイズ」: 章が変わる所で止まり、その章の理解クイズを出す
+  const cur = S.items[S.pos], nxt = S.items[S.pos + 1];
+  if ($("quizAtEnd").checked && cur && S.items.length > 1) {
+    const secs = S.paper.paper.sections, t = chapterTitle(secs, cur.sec);
+    const after = secs[secs.indexOf(cur.sec) + 1];            // 章の最後の文のあとだけ（節だけを聞いた終わりでは出さない）
+    const lastOfSec = !cur.sec.sentences.slice(cur.heading ? 0 : cur.n).some((x) => x.s);   // この節で読む文がもう無い
+    const chapterEnds = lastOfSec && (!after || chapterTitle(secs, after) !== t || after.kind === "back");
+    if (chapterEnds && (!nxt || chapterTitle(secs, nxt.sec) !== t) && quizChapter(S.paper.quiz, t) && !S.quizShown?.has(t)) {
+      (S.quizShown ||= new Set()).add(t);
+      S.paused = true;
+      showProgress();
+      setMedia();
+      openQuiz(t, { resume: true });
+      return;
+    }
+  }
+  S.pos++;
+  speakCurrent({ keep: true });
+}
+
+// ---- 理解クイズ（Mac の画面と同じ決まり）----
+const QZ = { audio: new Audio(), url: null };
+function renderQuizBtn() {
+  const q = S.paper?.quiz, n = (q?.chapters || []).reduce((a, c) => a + (c.questions || []).length, 0);
+  $("quizBtn").hidden = !n;
+  $("quizBtn").textContent = `？ 理解クイズ（${n}問）`;
+  S.quizShown = new Set();
+}
+async function openQuiz(title = null, opts = {}) {
+  const quiz = S.paper?.quiz;
+  if (!quiz?.chapters?.length) return;
+  QZ.resume = !!opts.resume;
+  const hist = ((await kv("quiz_history")) || []).filter((h) => h.paper === S.paper.id);
+  const sel = $("qzChapter");
+  sel.innerHTML = "";
+  for (const c of quiz.chapters) {
+    const last = [...hist].reverse().find((h) => h.chapter === c.chapter);
+    const o = document.createElement("option");
+    o.value = c.chapter;
+    o.textContent = `${c.chapter}${last ? `（前回 ${last.correct}/${last.total}）` : ""}`;
+    sel.appendChild(o);
+  }
+  sel.value = title && quizChapter(quiz, title) ? title : quiz.chapters[0].chapter;
+  $("quizPanel").hidden = false;
+  if (!opts.resume) history.pushState({ quiz: 1 }, "");
+  qzStart();
+}
+function qzStart() { QZ.ch = quizChapter(S.paper.quiz, $("qzChapter").value); QZ.i = 0; QZ.correct = 0; qzShow(); }
+function qzShow() {
+  const q = QZ.ch.questions[QZ.i];
+  QZ.done = false;
+  $("qzWhere").textContent = `${QZ.ch.chapter} ・ ${QZ.i + 1} / ${QZ.ch.questions.length} 問`;
+  fillWords($("qzQ"), q.q);
+  const box = $("qzChoices");
+  box.textContent = "";
+  q.choices.forEach((c, k) => {
+    const b = document.createElement("button");
+    b.innerHTML = `<b>${"ABCD"[k]}</b><span></span>`;
+    b.querySelector("span").textContent = c;
+    b.onclick = () => qzAnswer(k);
+    box.appendChild(b);
+  });
+  $("qzAfter").hidden = true;
+  $("qzNext").hidden = $("qzResume").hidden = $("qzAgain").hidden = true;
+  $("qzStat").textContent = "";
+}
+async function qzAnswer(k) {
+  if (QZ.done) return;
+  QZ.done = true;
+  const q = QZ.ch.questions[QZ.i], ok = k === q.answer;
+  if (ok) QZ.correct++;
+  [...$("qzChoices").children].forEach((b, j) => { b.classList.toggle("right", j === q.answer); b.classList.toggle("wrong", j === k && !ok); b.disabled = true; });
+  const after = $("qzAfter");
+  after.hidden = false;
+  after.innerHTML = `<b>${ok ? "正解" : "違います"}</b> <span class="ex"></span>`;
+  after.querySelector(".ex").textContent = q.explain || "";
+  for (const t of q.evidence || []) {
+    const p = document.createElement("p");
+    p.className = "ev";
+    const id = findSentenceId(S.paper.paper.sections, t);
+    const blob = id ? await db.get("audio", `${S.paper.id}/${id}`) : null;
+    const b = document.createElement("button");            // 音声が無ければブラウザの読み上げで
+    b.className = "sp";
+    b.textContent = "▶";
+    b.onclick = () => {
+      if (blob) { if (QZ.url) URL.revokeObjectURL(QZ.url); QZ.url = URL.createObjectURL(blob); QZ.audio.src = QZ.url; QZ.audio.playbackRate = parseFloat($("speed").value); QZ.audio.play().catch(() => {}); }
+      else if ("speechSynthesis" in window) { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(t); u.lang = "en-US"; speechSynthesis.speak(u); }
+    };
+    p.appendChild(b);
+    const sp = document.createElement("span");
+    fillWords(sp, t);
+    p.appendChild(sp);
+    after.appendChild(p);
+  }
+  if (QZ.i < QZ.ch.questions.length - 1) { $("qzNext").hidden = false; return; }
+  const h = (await kv("quiz_history")) || [];
+  h.push({ paper: S.paper.id, chapter: QZ.ch.chapter, correct: QZ.correct, total: QZ.ch.questions.length, t: new Date().toISOString() });
+  await kv("quiz_history", h.slice(-500));
+  $("qzStat").textContent = `${QZ.correct} / ${QZ.ch.questions.length} 問 正解`;
+  $("qzAgain").hidden = false;
+  $("qzResume").hidden = !QZ.resume;
+}
+function closeQuiz() { $("quizPanel").hidden = true; QZ.audio.pause(); }
+$("quizBtn").onclick = () => { const it = S.items[S.pos]; openQuiz(it ? chapterTitle(S.paper.paper.sections, it.sec) : null); };
+$("qzChapter").onchange = qzStart;
+$("qzNext").onclick = () => { QZ.i++; qzShow(); };
+$("qzAgain").onclick = qzStart;
+$("qzResume").onclick = () => { closeQuiz(); if (S.playing && S.paused) { S.paused = false; S.pos++; speakCurrent({ keep: true }); } };
+$("qzClose").onclick = () => { closeQuiz(); if (history.state?.quiz) history.back(); };
+addEventListener("popstate", () => { if (!$("quizPanel").hidden) closeQuiz(); });
+$("quizAtEnd").onchange = () => kv("quiz_at_end", $("quizAtEnd").checked);
 
 // at: その文の何秒目から、fromEnd: 文の終わりの何秒前から（5秒・10秒戻す・進めるで文をまたぐとき）
 // 再生の記録（止まった・飛んだ理由を後から見る。最近の 80 件。「データ」の「再生の記録」）
@@ -498,6 +610,7 @@ function showProgress() {
   fillWords($("nowText"), it.show);
   markRefs($("nowText"));
   $("nowMark").hidden = !!it.heading;
+  $("nowDict").hidden = !!it.heading;
   $("nowMark").classList.toggle("on", !it.heading && isMarked(it.show));
   $("nowMark").textContent = !it.heading && isMarked(it.show) ? "★" : "☆";
   const fk = it.heading ? [] : refKeys(it.show).filter((k) => S.figKeys?.has(k));
@@ -604,7 +717,7 @@ function dcItems() {
   if (DC.order === "rand") for (let k = out.length - 1; k > 0; k--) { const r = Math.floor(Math.random() * (k + 1)); [out[k], out[r]] = [out[r], out[k]]; }
   return out;
 }
-async function openDict() {
+async function openDict(start = null) {
   if (!S.paper) return;
   stop();
   DC.level = (await kv("dict_level")) || 2;
@@ -629,9 +742,39 @@ async function openDict() {
   $("dcOrder").value = DC.order;
   $("dictPanel").hidden = false;
   history.pushState({ dict: 1 }, "");
+  if (start) {                                     // 章の途中から: その章を範囲にして、順に
+    const ch = chapterOf(start.secId);
+    sel.value = ch && ch.kind !== "back" ? ch.id : "all";
+    DC.order = "seq";
+    $("dcOrder").value = "seq";
+    return dcRestart(start.id);
+  }
   dcRestart();
 }
-function dcRestart() { DC.items = dcItems(); DC.pos = 0; dcShow(); }
+// start: その文（音声 id）から始める。範囲はその文の章（節を含む）、順番は「順に」
+function dcRestart(startId) {
+  DC.items = dcItems();
+  let k = startId ? DC.items.findIndex((x) => x.id === startId) : -1;
+  if (startId && k < 0) {                            // 短くて練習にならない文なら、そのあとの最初の文から
+    const [, si, sk] = startId.match(/^s(\d+)_(\d+)$/) || [];
+    const secs = S.paper.paper.sections;
+    k = DC.items.findIndex((x) => { const xi = secs.indexOf(x.sec), xk = Number(x.id.split("_")[1]);
+      return xi > Number(si) || (xi === Number(si) && xk >= Number(sk)); });
+  }
+  DC.pos = Math.max(0, k);
+  dcShow();
+}
+function chapterOf(secId) {                          // その節を含む章（段 1）
+  const secs = S.paper.paper.sections;
+  let i = secs.findIndex((x) => x.id === secId);
+  while (i > 0 && secs[i].level > 1) i--;
+  return secs[i];
+}
+function dcGo(d) {
+  if (!DC.items?.length) return;
+  DC.pos = (DC.pos + d + DC.items.length) % DC.items.length;
+  dcShow();
+}
 async function dcSpeak(rate) {
   const it = DC.items[DC.pos];
   if (!it) return;
@@ -773,7 +916,7 @@ function closeDict() {
   DC.audio.pause();
   if ("speechSynthesis" in window) speechSynthesis.cancel();
 }
-$("dcOpen").onclick = openDict;
+$("dcOpen").onclick = () => openDict();
 $("dcClose").onclick = () => { if (history.state?.dict) history.back(); else closeDict(); };
 addEventListener("popstate", closeDict);
 $("dcPlay").onclick = () => dcSpeak();
@@ -781,7 +924,9 @@ $("dcSlow").onclick = () => dcSpeak(0.75);
 $("dcJaBtn").onclick = () => { $("dcJa").textContent = S.paper.ja?.[DC.items[DC.pos]?.id] || ""; $("dcJa").hidden = false; $("dcJaBtn").hidden = true; };
 $("dcCheck").onclick = dcCheck;
 $("dcNext").onclick = () => { DC.pos++; if (DC.pos >= DC.items.length) dcRestart(); else dcShow(); };
-$("dcSkip").onclick = () => { DC.pos++; if (DC.pos >= DC.items.length) dcRestart(); else dcShow(); };
+$("dcSkip").onclick = () => dcGo(1);
+$("dcPrev").onclick = () => dcGo(-1);
+$("nowDict").onclick = () => { const it = S.items[S.pos]; if (it && !it.heading) { setFull(false); openDict({ secId: it.sec.id, id: it.id }); } };
 $("dcScope").onchange = dcRestart;
 $("dcOrder").onchange = () => { DC.order = $("dcOrder").value; kv("dict_order", DC.order); dcRestart(); };
 
@@ -1064,7 +1209,9 @@ async function importBundle(file) {
     const figs = fj ? (JSON.parse(text(fj)).items || []) : [];             // 図・表・数式の一覧
     const gj = files.get(`papers/${pid}/glossary.json`);
     const glossary = gj ? (JSON.parse(text(gj)).terms || []) : [];         // 専門用語（辞書に無い語をこれで引く）
-    const entries = [["papers", pid, { id: pid, meta, paper, ja, durations, figures: figs, glossary }]];
+    const qj = files.get(`papers/${pid}/quiz.json`);
+    const quiz = qj ? JSON.parse(text(qj)) : null;                          // 章ごとの理解クイズ
+    const entries = [["papers", pid, { id: pid, meta, paper, ja, durations, figures: figs, glossary, quiz }]];
     for (const it of figs) {
       const bytes = files.get(`papers/${pid}/figures/${it.file}`);
       if (bytes) entries.push(["figures", `${pid}/${it.file}`, new Blob([bytes], { type: "image/png" })]);
@@ -1202,6 +1349,7 @@ async function init() {
   $("showJa").checked = showJa;
   $("sections").classList.toggle("hide-ja", !showJa);
   $("showJa").onchange = () => { kv("show_ja", $("showJa").checked); $("sections").classList.toggle("hide-ja", !$("showJa").checked); };
+  $("quizAtEnd").checked = !!(await kv("quiz_at_end"));
   S.revMode = (await kv("review_mode")) || "meaning";
   document.querySelectorAll("#revModes button").forEach((b) => b.classList.toggle("on", b.dataset.mode === S.revMode));
   const sp = await kv("speed");

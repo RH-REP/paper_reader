@@ -17,7 +17,7 @@
 | `store.py` | `data/papers/<sha8>/` への取り込み（元の PDF はコピーするだけ。貼り付けた英文は `original.txt`）・一覧・読み出し・章の編集（`edit_sections`: 段の上げ下げはその章と下の節だけ、分ける、前とつなぐ、名前。編集すると `manual` が付く） |
 | `figures.py` | 図・表・数式の画像（版 2）。キャプション（Fig. / FIGURE / Table）から探し、その上（表は下）の画像・線・小さい字をまとめて 200dpi で切り抜く。罫線・横罫の表、右端に番号のある式も切り抜く。直しきれないものは AI の手直しで（`figures.json` の `manual`） |
 | `quality.py` | 取り出した章と文の点検（章の並び・番号の飛び・文字の重なり・見えない文字・要旨に紛れた文献など）。重大なものがあれば画面で AI の手直しを勧める。`tools/check_paper.py` でも使う |
-| `aifix.py` | 画面のボタンで、この Mac の Claude Code（`claude -p`）に手直しを頼む。その論文のフォルダの読み書きと app の Python だけを許し、pip・ネットは禁止。対話用の CLAUDE.md は読ませない（`--setting-sources local`）。1本ずつ |
+| `aifix.py` | 画面のボタンで、この Mac の Claude Code（`claude -p`）に手直し、または理解クイズ（`quiz.json`。決まりは `ai_fix_prompt.md`「理解クイズ」）づくりを頼む。その論文のフォルダの読み書きと app の Python だけを許し、pip・ネットは禁止。対話用の CLAUDE.md は読ませない（`--setting-sources local`）。1本ずつ |
 | `state.py` | しおり（文の中身で覚える）と文の印・メモ（`state.sqlite`）。Mac とスマホで更新日時の新しいほうに合わせる |
 | `pronounce.py` | 読み方の辞書。単位・上付き・ギリシャ文字は組み込みで直し（7 μm → 7 micrometers）、略語などは自分で登録。音声に渡す文だけに使う |
 | `glossary.py` | 論文ごとの専門用語の一覧（辞書に無い語・略語と元の語・よく出る句）と端末内の訳。辞書に無い語はこれで引け、単語帳に登録できる |

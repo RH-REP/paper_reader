@@ -179,3 +179,18 @@ a.fr.missing{color:inherit;text-decoration:none}
 .dc-result{font-size:14px}.dc-result b{font-size:18px}
 .dc-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .sheet{z-index:9}
+.sec ol li .dc1{width:38px;height:38px;padding:0;margin:0 8px 0 -2px;border-radius:50%;vertical-align:-11px;font-size:15px;color:var(--muted);border:1px solid var(--line);background:var(--panel)}
+/* 図を大きく開く: 画像はバーと説明のあいだに必ず収め、拡大・移動できる */
+.lightbox{display:grid;grid-template-rows:auto 1fr auto auto auto;gap:6px}
+.lb-stage{position:relative;overflow:hidden;min-height:0;background:#fff;border-radius:6px;touch-action:none;display:flex;align-items:center;justify-content:center}
+.lb-stage img{max-width:100%;max-height:100%;width:auto;height:auto;margin:0;flex:none;object-fit:contain;transform-origin:center center;user-select:none;-webkit-user-drag:none}
+.lb-hint{margin:0;font-size:11.5px;color:#aab;text-align:center}
+/* 理解クイズ */
+.qz-q{font-size:18px;line-height:1.6;margin:6px 0}
+.qz-choices{display:grid;gap:8px}
+.qz-choices button{text-align:left;font-size:16px;padding:12px 14px;line-height:1.5;white-space:normal;background:var(--panel);border:1px solid var(--line);border-radius:10px;color:var(--ink)}
+.qz-choices button b{margin-right:8px;color:var(--muted)}
+.qz-choices button.right{background:rgba(46,139,87,.16);border-color:#2e8b57}
+.qz-choices button.wrong{background:rgba(192,57,43,.14);border-color:#b03a2e}
+.qz-after{font-size:15px;line-height:1.7;background:var(--bg);border-radius:10px;padding:10px 12px;margin-top:8px}
+.qz-after .ev{margin:6px 0 0;color:var(--ink2)}

@@ -54,6 +54,8 @@ def make_bundle(store, vocab, paper_ids: list[str], out_dir: Path, state=None) -
                     f = d / "figures" / str(it.get("file", ""))
                     if f.is_file() and f.suffix == ".png":
                         z.write(f, f"papers/{pid}/figures/{f.name}", compress_type=zipfile.ZIP_STORED)
+            if (d / "quiz.json").exists():                 # 章ごとの理解クイズ
+                z.write(d / "quiz.json", f"papers/{pid}/quiz.json", compress_type=zipfile.ZIP_STORED)
             if (d / "glossary.json").exists():             # 専門用語（スマホでも、辞書に無い語をこれで引く）
                 z.write(d / "glossary.json", f"papers/{pid}/glossary.json", compress_type=zipfile.ZIP_STORED)
             if (d / "translation.json").exists():

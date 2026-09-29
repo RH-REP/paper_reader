@@ -77,7 +77,7 @@ class AiFixer:
         with self.lock:
             return self.pid if self.proc and self.proc.poll() is None else None
 
-    def start(self, pid: str, paper_dir: Path, prompt: str, python: str, on_done=None) -> dict:
+    def start(self, pid: str, paper_dir: Path, prompt: str, python: str, on_done=None, task: str = "fix") -> dict:
         cli = find_cli()
         if not cli:
             raise RuntimeError("この Mac に Claude Code（claude コマンド）が見つからない")
@@ -102,7 +102,7 @@ class AiFixer:
             env = {**os.environ, "PATH": os.environ.get("PATH", "") + ":" + os.path.expanduser("~/.local/bin") + ":/opt/homebrew/bin"}
             self.proc = subprocess.Popen(cmd, cwd=paper_dir, stdout=subprocess.PIPE, stderr=log, text=True, env=env)
             self.pid = pid
-            st = {"state": "running", "started_at": datetime.now().isoformat(timespec="seconds"), "tools": 0,
+            st = {"state": "running", "task": task, "started_at": datetime.now().isoformat(timespec="seconds"), "tools": 0,
                   "last": "始めています", "result": "", "cost_usd": None}
             _write(paper_dir, st)
             self.stopping.discard(pid)

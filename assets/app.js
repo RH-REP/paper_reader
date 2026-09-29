@@ -1,7 +1,7 @@
 // paper_reader の画面。論文の一覧・取り込み・章ごとの読み上げ・単語検索と単語帳。
 // 読み上げは、サーバーが say で作った1文ずつの m4a を順に鳴らす（どのブラウザでも同じ声）。
 // 音声がまだできていない間だけ、ブラウザの読み上げ（Web Speech API）で代わりに読む。
-import { fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating,
+import { chapterTitle, findSentenceId, quizChapter, attachZoom, fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating,
          tokenize, pickBlanks, gradeWord, gradeSentence, levelAdvice } from "./shared.js";
 
 const $ = (id) => document.getElementById(id);
@@ -135,6 +135,7 @@ async function openPaper(id) {
   watchTerms();
   renderQuality();
   if (p.ai_fix?.state === "running") watchAiFix();
+  loadQuiz();
 }
 
 function renderMeta() {
@@ -183,9 +184,11 @@ async function loadFigures() {
 }
 $("figBtn").onclick = () => { $("figPanel").hidden = !$("figPanel").hidden; };
 
+const LBZ = attachZoom($("lbStage"), $("lbImg"), { onSwipe: (d) => openLightbox(S.lbIndex + d) });
 function openLightbox(i) {
   const n = S.figures.length;
   if (!n) return;
+  LBZ.reset();
   S.lbIndex = (i + n) % n;
   const f = S.figures[S.lbIndex];
   $("lbImg").src = f.url;
@@ -338,6 +341,12 @@ function renderSections() {
           b.title = "この文だけ再生";
           b.onclick = () => play([sentenceItem(sec, k)]);
           x.appendChild(b);
+          const dcb = document.createElement("button");
+          dcb.className = "dc1";
+          dcb.textContent = "✎";
+          dcb.title = "この文からディクテーション";
+          dcb.onclick = () => openDict({ secId: sec.id, id: `${sec.id}_${k + 1}` });
+          x.appendChild(dcb);
         }
         const t = document.createElement("span");
         fillWords(t, s.t);
@@ -437,7 +446,7 @@ function renderQuality() {
   box.textContent = "";
   if (a.state === "running") {
     box.classList.add("run");
-    box.innerHTML = `<b>AI が手直ししています</b>（経過 ${elapsed(a.started_at)}・操作 ${a.tools} 回）<br><span class="muted"></span>
+    box.innerHTML = `<b>${a.task === "quiz" ? "AI が理解クイズを作っています" : "AI が手直ししています"}</b>（経過 ${elapsed(a.started_at)}・操作 ${a.tools} 回）<br><span class="muted"></span>
       <div><button class="small" id="aiStop">止める</button></div>`;
     box.querySelector(".muted").textContent = a.last || "";
     box.querySelector("#aiStop").onclick = async () => { await post(`/api/papers/${p.id}/ai_fix`, { action: "stop" }).catch(() => {}); };
@@ -447,7 +456,8 @@ function renderQuality() {
   const justDone = ["done", "error", "stopped"].includes(a.state) && S.aiShown !== a.finished_at;
   if (justDone || (["done", "error"].includes(a.state) && S.showAiResult)) {
     box.classList.add(a.state === "done" ? "ok" : "");
-    const title = { done: "AI の手直しが終わりました", error: "AI の手直しが途中で止まりました", stopped: "AI の手直しを止めました" }[a.state];
+    const what = a.task === "quiz" ? "理解クイズづくり" : "手直し";
+    const title = { done: `AI の${what}が終わりました`, error: `AI の${what}が途中で止まりました`, stopped: `AI の${what}を止めました` }[a.state];
     box.innerHTML = `<b></b> <span class="muted"></span><details><summary>AI の報告</summary><pre></pre></details>
       <div><button class="small" id="aiOk">閉じる</button></div>`;
     box.querySelector("b").textContent = title;
@@ -534,7 +544,7 @@ function dcItems() {
   return out;
 }
 
-function openDict() {
+function openDict(start = null) {
   if (!S.paper) return;
   stop();
   const sel = $("dcScope");
@@ -552,10 +562,39 @@ function openDict() {
   }
   $("dcOrder").value = DC.order;
   $("dictPanel").hidden = false;
+  if (start) {                                     // 章の途中から: その章を範囲にして、順に
+    sel.value = chapterOf(start.secId)?.kind === "back" ? "all" : (chapterOf(start.secId)?.id || "all");
+    DC.order = "seq";
+    $("dcOrder").value = "seq";
+    return dcRestart(start.id);
+  }
   dcRestart();
 }
 
-function dcRestart() { DC.items = dcItems(); DC.pos = 0; dcShow(); }
+// start: その文（音声 id）から始める。範囲はその文の章（節を含む）、順番は「順に」
+function dcRestart(startId) {
+  DC.items = dcItems();
+  let k = startId ? DC.items.findIndex((x) => x.id === startId) : -1;
+  if (startId && k < 0) {                            // 短くて練習にならない文なら、そのあとの最初の文から
+    const [, si, sk] = startId.match(/^s(\d+)_(\d+)$/) || [];
+    const secs = S.paper.sections;
+    k = DC.items.findIndex((x) => { const xi = secs.indexOf(x.sec), xk = Number(x.id.split("_")[1]);
+      return xi > Number(si) || (xi === Number(si) && xk >= Number(sk)); });
+  }
+  DC.pos = Math.max(0, k);
+  dcShow();
+}
+function chapterOf(secId) {                          // その節を含む章（段 1）
+  const secs = S.paper.sections;
+  let i = secs.findIndex((x) => x.id === secId);
+  while (i > 0 && secs[i].level > 1) i--;
+  return secs[i];
+}
+function dcGo(d) {
+  if (!DC.items?.length) return;
+  DC.pos = (DC.pos + d + DC.items.length) % DC.items.length;
+  dcShow();
+}
 
 function dcSpeak(rate) {
   const it = DC.items[DC.pos];
@@ -692,21 +731,143 @@ function dcStats() {
   }
 }
 
-$("dictBtn").onclick = openDict;
+$("dictBtn").onclick = () => openDict();
+$("dcPrev").onclick = () => dcGo(-1);
+$("nowDict").onclick = () => { const it = S.items[S.pos]; if (it && !it.heading) openDict({ secId: it.sec.id, id: it.id }); };
 $("dcClose").onclick = () => { $("dictPanel").hidden = true; DC.audio.pause(); if ("speechSynthesis" in window) speechSynthesis.cancel(); };
 $("dcPlay").onclick = () => { dcSpeak(); DC.inputs.find((x) => x.isConnected)?.focus(); };
 $("dcSlow").onclick = () => { dcSpeak(0.75); DC.inputs.find((x) => x.isConnected)?.focus(); };
 $("dcJaBtn").onclick = () => { $("dcJa").textContent = S.paper.ja?.[DC.items[DC.pos]?.id] || ""; $("dcJa").hidden = false; $("dcJaBtn").hidden = true; };
 $("dcCheck").onclick = dcCheck;
 $("dcNext").onclick = () => { DC.pos++; if (DC.pos >= DC.items.length) dcRestart(); else dcShow(); };
-$("dcSkip").onclick = () => { DC.pos++; if (DC.pos >= DC.items.length) dcRestart(); else dcShow(); };
+$("dcSkip").onclick = () => dcGo(1);
 $("dcScope").onchange = dcRestart;
 $("dcOrder").onchange = () => { DC.order = $("dcOrder").value; pref.set("dictOrder", DC.order); dcRestart(); };
 document.addEventListener("keydown", (e) => {
   if ($("dictPanel").hidden) return;
   if (e.key === "Escape") { $("dcClose").click(); e.preventDefault(); }
   else if ((e.metaKey || e.ctrlKey) && (e.key === "r" || e.key === "R")) { e.preventDefault(); $("dcPlay").click(); }
+  else if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); dcGo(-1); }
+  else if (e.altKey && e.key === "ArrowRight") { e.preventDefault(); dcGo(1); }
   else if (e.key === "Enter" && !$("dcNext").hidden && !/INPUT|TEXTAREA/.test(e.target.tagName)) { e.preventDefault(); $("dcNext").click(); }
+}, true);
+
+// ---- 理解クイズ（章ごと。quiz.json は AI が作る）----
+const QZ = { audio: new Audio() };
+async function loadQuiz() {
+  const id = S.paper.id;
+  S.quiz = await api(`/api/papers/${id}/quiz`).catch(() => ({ chapters: [] }));
+  if (S.paper?.id !== id) return;
+  S.quizShown = new Set();
+  const n = (S.quiz.chapters || []).reduce((a, c) => a + (c.questions || []).length, 0);
+  $("quizBtn").hidden = !n;
+  $("quizBtn").textContent = `？ 理解クイズ（${S.quiz.chapters.length}章・${n}問）`;
+  $("quizMakeBtn").hidden = !!n || !S.paper.ai_fix?.available || S.paper.ai_fix?.state === "running";
+}
+function quizHist() { return pref.get("quizHistory", []); }
+function openQuiz(title = null, opts = {}) {
+  if (!S.quiz?.chapters?.length) return;
+  QZ.resume = !!opts.resume;
+  const sel = $("qzChapter");
+  sel.innerHTML = "";
+  const hist = quizHist().filter((h) => h.paper === S.paper.id);
+  for (const c of S.quiz.chapters) {
+    const last = [...hist].reverse().find((h) => h.chapter === c.chapter);
+    const o = document.createElement("option");
+    o.value = c.chapter;
+    o.textContent = `${c.chapter}${last ? `（前回 ${last.correct}/${last.total}）` : ""}`;
+    sel.appendChild(o);
+  }
+  sel.value = title && quizChapter(S.quiz, title) ? title : S.quiz.chapters[0].chapter;
+  $("quizPanel").hidden = false;
+  qzStart();
+}
+function qzStart() {
+  QZ.ch = quizChapter(S.quiz, $("qzChapter").value);
+  QZ.i = 0;
+  QZ.correct = 0;
+  qzShow();
+}
+function qzShow() {
+  const q = QZ.ch.questions[QZ.i];
+  QZ.done = false;
+  $("qzWhere").textContent = `${QZ.ch.chapter} ・ ${QZ.i + 1} / ${QZ.ch.questions.length} 問（単語を押すと辞書）`;
+  fillWords($("qzQ"), q.q);
+  const box = $("qzChoices");
+  box.textContent = "";
+  q.choices.forEach((c, k) => {
+    const b = document.createElement("button");
+    b.innerHTML = `<kbd>${k + 1}</kbd><span></span>`;
+    b.querySelector("span").textContent = c;
+    b.onclick = () => qzAnswer(k);
+    box.appendChild(b);
+  });
+  $("qzAfter").hidden = true;
+  $("qzNext").hidden = $("qzResume").hidden = $("qzAgain").hidden = true;
+  $("qzStat").textContent = "";
+}
+function qzAnswer(k) {
+  if (QZ.done) return;
+  QZ.done = true;
+  const q = QZ.ch.questions[QZ.i], ok = k === q.answer;
+  if (ok) QZ.correct++;
+  [...$("qzChoices").children].forEach((b, j) => { b.classList.toggle("right", j === q.answer); b.classList.toggle("wrong", j === k && !ok); b.disabled = true; });
+  const after = $("qzAfter");
+  after.hidden = false;
+  after.innerHTML = `<b>${ok ? "正解" : "違います"}</b> <span class="ex"></span>`;
+  after.querySelector(".ex").textContent = q.explain || "";
+  for (const t of q.evidence || []) {               // 根拠の文（押すとその文を聞ける）
+    const p = document.createElement("p");
+    p.className = "ev";
+    const id = findSentenceId(S.paper.sections, t);
+    const b = document.createElement("button");            // 音声ができていなければブラウザの読み上げで
+    b.className = "small";
+    b.textContent = "▶";
+    b.title = "根拠の文を聞く";
+    b.onclick = () => {
+      const tts = () => { if (!("speechSynthesis" in window)) return; speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(t); u.lang = "en-US"; u.rate = parseFloat($("speed").value); speechSynthesis.speak(u); };
+      if (id && S.audio?.state === "done") { QZ.audio.src = `/api/papers/${S.paper.id}/audio/${id}.m4a`; QZ.audio.playbackRate = parseFloat($("speed").value); QZ.audio.onerror = tts; QZ.audio.play().catch(tts); }
+      else tts();
+    };
+    p.appendChild(b);
+    const sp = document.createElement("span");
+    fillWords(sp, t);
+    p.appendChild(sp);
+    after.appendChild(p);
+  }
+  const last = QZ.i >= QZ.ch.questions.length - 1;
+  if (!last) { $("qzNext").hidden = false; $("qzNext").focus(); return; }
+  const h = quizHist();
+  h.push({ paper: S.paper.id, chapter: QZ.ch.chapter, correct: QZ.correct, total: QZ.ch.questions.length, t: new Date().toISOString() });
+  pref.set("quizHistory", h.slice(-500));
+  $("qzStat").textContent = `この章 ${QZ.correct} / ${QZ.ch.questions.length} 問 正解`;
+  $("qzAgain").hidden = false;
+  $("qzResume").hidden = !QZ.resume;
+  (QZ.resume ? $("qzResume") : $("qzAgain")).focus();
+}
+function closeQuiz() { $("quizPanel").hidden = true; QZ.audio.pause(); }
+$("quizBtn").onclick = () => { const it = S.items[S.pos]; openQuiz(it ? chapterTitle(S.paper.sections, it.sec) : null); };
+$("quizMakeBtn").onclick = async () => {
+  if (!confirm("この論文の文を Claude（Anthropic）に送り、章ごとの理解クイズを作らせます。\nClaude Code の利用料がかかります（論文1本で $1 前後）。数分かかります。始めますか？")) return;
+  try { S.paper.ai_fix = { ...(await post(`/api/papers/${S.paper.id}/ai_fix`, { action: "start", task: "quiz" })), available: true }; }
+  catch (e) { alert(`始められませんでした: ${e.message}`); return; }
+  $("quizMakeBtn").hidden = true;
+  renderQuality();
+  watchAiFix();
+};
+$("qzChapter").onchange = qzStart;
+$("qzNext").onclick = () => { QZ.i++; qzShow(); };
+$("qzAgain").onclick = qzStart;
+$("qzResume").onclick = () => { closeQuiz(); if (S.playing && S.paused) { S.paused = false; S.pos++; speakCurrent(); } };
+$("qzClose").onclick = closeQuiz;
+$("quizAtEnd").checked = pref.get("quizAtEnd", false);
+$("quizAtEnd").onchange = () => pref.set("quizAtEnd", $("quizAtEnd").checked);
+document.addEventListener("keydown", (e) => {
+  if ($("quizPanel").hidden || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+  if (e.key === "Escape") { closeQuiz(); e.preventDefault(); }
+  else if (!QZ.done && ["1", "2", "3", "4"].includes(e.key)) { qzAnswer(Number(e.key) - 1); e.preventDefault(); }
+  else if (e.key === "Enter" && QZ.done) { e.preventDefault(); (!$("qzNext").hidden ? $("qzNext") : !$("qzResume").hidden ? $("qzResume") : $("qzAgain")).click(); }
+  e.stopPropagation();
 }, true);
 
 // ---- 専門用語 ----
@@ -1092,6 +1253,23 @@ function haltOutput() {
 
 function advance(g) {
   if (g !== S.gen || S.paused) return;
+  // 「章の終わりにクイズ」: 章が変わる所（最後の文のあと）で止まり、その章の理解クイズを出す
+  const cur = S.items[S.pos], nxt = S.items[S.pos + 1];
+  if ($("quizAtEnd").checked && cur && S.items.length > 1) {
+    const secs = S.paper.sections, t = chapterTitle(secs, cur.sec);
+    // 章の最後の文のあと（本文の並びで、次の節が別の章か、もう無い）。節だけを聞いた終わりでは出さない
+    const after = secs[secs.indexOf(cur.sec) + 1];
+    const lastOfSec = !cur.sec.sentences.slice(cur.heading ? 0 : cur.n).some((x) => x.s);   // この節で読む文がもう無い
+    const chapterEnds = lastOfSec && (!after || chapterTitle(secs, after) !== t || after.kind === "back");
+    if (chapterEnds && (!nxt || chapterTitle(secs, nxt.sec) !== t) && quizChapter(S.quiz, t) && !S.quizShown?.has(t)) {
+      (S.quizShown ||= new Set()).add(t);
+      S.paused = true;
+      showProgress();
+      status(`章「${t}」が終わりました — 理解クイズ`);
+      openQuiz(t, { resume: true });
+      return;
+    }
+  }
   S.pos++;
   speakCurrent();
 }
@@ -1226,6 +1404,7 @@ function showProgress() {
   fillWords(now, it.show);
   markRefs(now);
   $("nowMark").hidden = !!it.heading;
+  $("nowDict").hidden = !!it.heading;
   $("nowMark").classList.toggle("on", !it.heading && isMarked(it.show));
   $("nowMark").textContent = !it.heading && isMarked(it.show) ? "★" : "☆";
   const fk = it.heading ? [] : refKeys(it.show).filter((k) => S.figKeys?.has(k));
@@ -1755,6 +1934,9 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeLightbox();
     else if (e.key === "ArrowLeft") openLightbox(S.lbIndex - 1);
     else if (e.key === "ArrowRight") openLightbox(S.lbIndex + 1);
+    else if (e.key === "+" || e.key === "=") LBZ.zoomBy(1.4);
+    else if (e.key === "-") LBZ.zoomBy(1 / 1.4);
+    else if (e.key === "0") LBZ.reset();
     e.preventDefault();
     return;
   }

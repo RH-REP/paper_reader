@@ -130,6 +130,8 @@
         <button id="marksBtn" class="small" hidden>★ 印</button>
         <button id="termsBtn" class="small" hidden>用語</button>
         <button id="dictBtn" class="small" title="文を聞いて、空欄の語を打つ">✎ ディクテーション</button>
+        <button id="quizBtn" class="small" hidden>？ 理解クイズ</button>
+        <button id="quizMakeBtn" class="small" hidden title="この Mac の Claude Code に、章ごとの理解クイズを作らせる">理解クイズを作る（Claude Code）</button>
         <button id="editBtn" class="small" aria-pressed="false" title="見出しの段を上げ下げ・章を分ける・つなぐ・名前を変える">章を編集</button>
         <button id="aiBtn" class="small">AI に手直しを頼む（プロンプトをコピー）</button>
         <span id="manualTag" class="muted"></span></p>
@@ -186,6 +188,7 @@
         </div>
         <div id="nowRow" class="nowrow" hidden>
           <button id="nowMark" class="mk" title="この文に印を付ける（M）">☆</button>
+          <button id="nowDict" class="mk" title="この文からディクテーション">✎</button>
           <p id="nowText" class="now"></p>
           <img id="nowFig" class="nowfig" hidden alt="" title="この文が指す図（押すと大きく開く）">
         </div>
@@ -193,6 +196,7 @@
           <label>再生速度 <input type="range" id="speed" min="0.7" max="2" step="0.05" value="1"> <span id="speedVal">1.00</span>×</label>
           <label><input type="checkbox" id="skipBack" checked> 後付け（References など）を「全体」で読まない</label>
           <label><input type="checkbox" id="showJa" checked> 訳を表示</label>
+          <label title="通しで聞いているとき、章が終わるたびに止まって理解クイズを出す"><input type="checkbox" id="quizAtEnd"> 章の終わりにクイズ</label>
           <label>声 <select id="voice"></select></label>
           <button id="regen" class="small" hidden>この声で作り直す</button>
           <button id="pronBtn" class="small" title="略語・単位などの読み方">読み方の辞書</button>
@@ -204,6 +208,17 @@
     </section>
     </div>
   </main>
+</div>
+
+<div id="quizPanel" class="dictpanel" hidden>
+  <div class="dc-head"><b>理解クイズ</b> <label>章 <select id="qzChapter"></select></label>
+    <span id="qzStat" class="muted"></span> <button id="qzClose" class="small">閉じる <kbd>Esc</kbd></button></div>
+  <div id="qzWhere" class="dc-where muted"></div>
+  <div id="qzQ" class="qz-q"></div>
+  <div id="qzChoices" class="qz-choices"></div>
+  <div id="qzAfter" class="qz-after" hidden></div>
+  <div class="dc-actions"><button id="qzNext" class="primary" hidden>次の問題 <kbd>Enter</kbd></button>
+    <button id="qzResume" class="primary" hidden>▶ 続きを聞く</button> <button id="qzAgain" class="small" hidden>この章をもう一度</button></div>
 </div>
 
 <div id="dictPanel" class="dictpanel" hidden>
@@ -222,7 +237,7 @@
   <div id="dcText" class="dc-text"></div>
   <div id="dcResult" class="dc-result" hidden></div>
   <div class="dc-actions"><button id="dcCheck" class="primary">答え合わせ <kbd>Enter</kbd></button>
-    <button id="dcNext" class="primary" hidden>次へ <kbd>Enter</kbd></button> <button id="dcSkip" class="small">飛ばす</button></div>
+    <button id="dcNext" class="primary" hidden>次へ <kbd>Enter</kbd></button> <button id="dcPrev" class="small" title="前の文（Alt+←）">◀ 前の文</button> <button id="dcSkip" class="small" title="次の文（Alt+→）">次の文 ▶</button></div>
 </div>
 
 <dialog id="pronDlg" class="pastedlg">
@@ -262,9 +277,10 @@
   <div class="lb-bar"><b id="lbLabel"></b> <span id="lbCount" class="muted"></span>
     <a id="lbOpen" target="_blank" rel="noopener" class="btn small">画像を新しいタブで開く ↗</a>
     <button id="lbClose" class="small">閉じる（Esc）</button></div>
-  <button id="lbPrev" class="lb-nav prev" title="前（←）">‹</button>
-  <img id="lbImg" alt="">
-  <button id="lbNext" class="lb-nav next" title="次（→）">›</button>
+  <div id="lbStage" class="lb-stage"><img id="lbImg" alt="" draggable="false">
+    <button id="lbPrev" class="lb-nav prev" title="前（←）">‹</button>
+    <button id="lbNext" class="lb-nav next" title="次（→）">›</button></div>
+  <p class="lb-hint">ホイール・ピンチ・ダブルクリックで拡大、ドラッグで動かす（<kbd>+</kbd> <kbd>−</kbd> <kbd>0</kbd>）</p>
   <p id="lbCaption" class="lb-cap"></p>
 </div>
 
