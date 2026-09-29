@@ -4,9 +4,10 @@ import * as db from "./db.js";
 import { lookup } from "./lookup.js";
 import * as srs from "./srs.js";
 import { unzipStored, text } from "./zip.js";
-import { fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating } from "./shared.js";
+import { fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating,
+         tokenize, pickBlanks, gradeWord, gradeSentence, levelAdvice } from "./shared.js";
 
-const VERSION = "12";
+const VERSION = "13";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
@@ -582,6 +583,207 @@ $("speed").oninput = () => {
   S.player.playbackRate = parseFloat($("speed").value);
   kv("speed", $("speed").value);
 };
+
+// ---- ディクテーション（Mac の画面と同じ決まり。空欄はランダム、判定は shared.js）----
+const DC = { level: 2, order: "seq", audio: new Audio(), url: null };
+const LEVEL_NAMES = ["", "1語", "2割", "4割", "内容語すべて", "全文"];
+
+function dcItems() {
+  const secs = S.paper.paper.sections, scope = $("dcScope").value;
+  let pick = secs.filter((x) => x.kind !== "back");
+  if (scope !== "all") {
+    const i = secs.findIndex((x) => x.id === scope);
+    let j = i + 1;
+    while (j < secs.length && secs[j].level > secs[i].level) j++;
+    pick = secs.slice(i, j);
+  }
+  const out = [];
+  for (const sec of pick) sec.sentences.forEach((x, k) => {
+    if (x.s && tokenize(x.t).filter((w) => w.word).length >= 4) out.push({ sec, id: `${sec.id}_${k + 1}`, t: x.t, s: x.s });
+  });
+  if (DC.order === "rand") for (let k = out.length - 1; k > 0; k--) { const r = Math.floor(Math.random() * (k + 1)); [out[k], out[r]] = [out[r], out[k]]; }
+  return out;
+}
+async function openDict() {
+  if (!S.paper) return;
+  stop();
+  DC.level = (await kv("dict_level")) || 2;
+  DC.order = (await kv("dict_order")) || "seq";
+  const sel = $("dcScope");
+  sel.innerHTML = '<option value="all">全体（後付けを除く）</option>';
+  for (const sec of S.paper.paper.sections.filter((x) => x.level === 1 && x.kind !== "back")) {
+    const o = document.createElement("option");
+    o.value = sec.id;
+    o.textContent = sec.title;
+    sel.appendChild(o);
+  }
+  const lv = $("dcLevels");
+  lv.innerHTML = "";
+  for (let n = 1; n <= 5; n++) {
+    const b = document.createElement("button");
+    b.textContent = `Lv${n} ${LEVEL_NAMES[n]}`;
+    b.classList.toggle("on", n === DC.level);
+    b.onclick = () => { DC.level = n; kv("dict_level", n); lv.querySelectorAll("button").forEach((x, i) => x.classList.toggle("on", i + 1 === n)); dcShow(); };
+    lv.appendChild(b);
+  }
+  $("dcOrder").value = DC.order;
+  $("dictPanel").hidden = false;
+  history.pushState({ dict: 1 }, "");
+  dcRestart();
+}
+function dcRestart() { DC.items = dcItems(); DC.pos = 0; dcShow(); }
+async function dcSpeak(rate) {
+  const it = DC.items[DC.pos];
+  if (!it) return;
+  DC.audio.pause();
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+  const r = rate || parseFloat($("speed").value);
+  const blob = await db.get("audio", `${S.paper.id}/${it.id}`);
+  if (blob) {
+    if (DC.url) URL.revokeObjectURL(DC.url);
+    DC.url = URL.createObjectURL(blob);
+    DC.audio.src = DC.url;
+    DC.audio.playbackRate = r;
+    DC.audio.play().catch(() => {});
+  } else if ("speechSynthesis" in window) {
+    const u = new SpeechSynthesisUtterance(it.s);
+    u.lang = "en-US";
+    u.rate = r;
+    speechSynthesis.speak(u);
+  }
+}
+function dcShow() {
+  const it = DC.items[DC.pos];
+  $("dcResult").hidden = true;
+  $("dcCheck").hidden = false;
+  $("dcNext").hidden = true;
+  $("dcJa").hidden = true;
+  $("dcJaBtn").hidden = false;
+  const box = $("dcText");
+  box.textContent = "";
+  dcStats();
+  if (!it) { box.textContent = "この範囲に練習できる文がありません。"; $("dcWhere").textContent = ""; return; }
+  $("dcWhere").textContent = `${it.sec.title} ・ ${DC.pos + 1} / ${DC.items.length} 文`;
+  const ja = S.paper.ja?.[it.id];
+  $("dcJaBtn").disabled = !ja;
+  $("dcJaBtn").textContent = ja ? "押して訳を表示" : "（訳なし）";
+  DC.tokens = tokenize(it.t);
+  DC.blanks = pickBlanks(DC.tokens, DC.level);
+  DC.inputs = [];
+  if (DC.level >= 5) {
+    const ta = document.createElement("textarea");
+    ta.rows = 4;
+    ta.placeholder = "聞こえた文をそのまま打つ";
+    ta.spellcheck = false;
+    ta.setAttribute("autocapitalize", "off");
+    box.appendChild(ta);
+    DC.inputs.push(ta);
+  } else {
+    DC.tokens.forEach((x, i) => {
+      if (!DC.blanks.has(i)) { box.append(x.t); return; }
+      const inp = document.createElement("input");
+      inp.spellcheck = false;
+      inp.autocomplete = "off";
+      inp.setAttribute("autocapitalize", "off");
+      inp.setAttribute("autocorrect", "off");
+      inp.style.width = `${Math.max(3, x.t.length + 1)}ch`;
+      inp.dataset.i = i;
+      inp.onkeydown = (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        const k = DC.inputs.indexOf(inp);
+        if (k < DC.inputs.length - 1) DC.inputs[k + 1].focus(); else dcCheck();
+      };
+      box.appendChild(inp);
+      DC.inputs.push(inp);
+    });
+    DC.inputs.forEach((x, k) => x.setAttribute("enterkeyhint", k < DC.inputs.length - 1 ? "next" : "done"));
+  }
+  dcSpeak();
+}
+function dcWordSpan(t, r, typed) {
+  const frag = document.createDocumentFragment();
+  const sp = document.createElement("span");
+  sp.className = `dc-w w ${r}`;                  // .w: 押すと辞書（外した語を単語帳に登録できる）
+  sp.textContent = t;
+  frag.appendChild(sp);
+  if (typed && r !== "ok") { const y = document.createElement("span"); y.className = "dc-you"; y.textContent = typed; frag.appendChild(y); }
+  return frag;
+}
+async function dcCheck() {
+  const it = DC.items[DC.pos];
+  if (!it || !$("dcNext").hidden) return;
+  const box = $("dcText");
+  box.dataset.t = it.t;
+  box.dataset.sec = it.sec.id;
+  let score, nOk = 0, nNear = 0, nNg = 0, extra = [];
+  if (DC.level >= 5) {
+    const g = gradeSentence(DC.inputs[0].value, it.t);
+    box.textContent = "";
+    let w = 0;
+    for (const x of DC.tokens) {
+      if (!x.word) { box.append(x.t); continue; }
+      const r = g.words[w++]?.r || "ng";
+      box.appendChild(dcWordSpan(x.t, r));
+      r === "ok" ? nOk++ : r === "near" ? nNear++ : nNg++;
+    }
+    extra = g.extra;
+    score = g.score;
+  } else {
+    for (const inp of DC.inputs) {
+      const ans = DC.tokens[Number(inp.dataset.i)].t, r = gradeWord(inp.value, ans);
+      inp.replaceWith(dcWordSpan(ans, r, inp.value.trim()));
+      r === "ok" ? nOk++ : r === "near" ? nNear++ : nNg++;
+    }
+    const n = nOk + nNear + nNg;
+    score = n ? (nOk + nNear * 0.5) / n : 0;
+  }
+  const hist = (await kv("dict_history")) || [];
+  hist.push({ paper: S.paper.id, level: DC.level, score: Math.round(score * 100) / 100, t: new Date().toISOString() });
+  await kv("dict_history", hist.slice(-300));
+  const res = $("dcResult");
+  res.hidden = false;
+  res.textContent = "";
+  res.insertAdjacentHTML("beforeend", `<b>${Math.round(score * 100)}%</b>　○ ${nOk}　△ ${nNear}　× ${nNg}`);
+  if (extra.length) { const e = document.createElement("div"); e.className = "muted small"; e.textContent = `元の文に無い語: ${extra.join(", ")}`; res.appendChild(e); }
+  res.insertAdjacentHTML("beforeend", '<div class="muted small">語をタップすると辞書（単語帳に登録できる）。△ は1字違いか別の形。</div>');
+  $("dcCheck").hidden = true;
+  $("dcNext").hidden = false;
+  document.activeElement?.blur();
+  dcStats();
+}
+async function dcStats() {
+  const a = levelAdvice((await kv("dict_history")) || [], DC.level);
+  $("dcStat").textContent = a.rate == null ? "" : `Lv${DC.level} の正解率 ${Math.round(a.rate * 100)}%（直近 ${a.n} 文）`;
+  const box = $("dcAdvice");
+  box.hidden = !a.advice;
+  if (a.advice) {
+    const to = DC.level + (a.advice === "up" ? 1 : -1);
+    box.textContent = `${a.advice === "up" ? "よくできています" : "少し難しいようです"}。Lv${to}（${LEVEL_NAMES[to]}）に${a.advice === "up" ? "上げ" : "下げ"}ますか？ `;
+    const b = document.createElement("button");
+    b.className = "btn";
+    b.textContent = `Lv${to} にする`;
+    b.onclick = () => $("dcLevels").children[to - 1].click();
+    box.appendChild(b);
+  }
+}
+function closeDict() {
+  if ($("dictPanel").hidden) return;
+  $("dictPanel").hidden = true;
+  DC.audio.pause();
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+}
+$("dcOpen").onclick = openDict;
+$("dcClose").onclick = () => { if (history.state?.dict) history.back(); else closeDict(); };
+addEventListener("popstate", closeDict);
+$("dcPlay").onclick = () => dcSpeak();
+$("dcSlow").onclick = () => dcSpeak(0.75);
+$("dcJaBtn").onclick = () => { $("dcJa").textContent = S.paper.ja?.[DC.items[DC.pos]?.id] || ""; $("dcJa").hidden = false; $("dcJaBtn").hidden = true; };
+$("dcCheck").onclick = dcCheck;
+$("dcNext").onclick = () => { DC.pos++; if (DC.pos >= DC.items.length) dcRestart(); else dcShow(); };
+$("dcSkip").onclick = () => { DC.pos++; if (DC.pos >= DC.items.length) dcRestart(); else dcShow(); };
+$("dcScope").onchange = dcRestart;
+$("dcOrder").onchange = () => { DC.order = $("dcOrder").value; kv("dict_order", DC.order); dcRestart(); };
 
 // ---- 単語 ----
 function audioRef(sentence) {

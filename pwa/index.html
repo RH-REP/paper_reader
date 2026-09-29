@@ -28,7 +28,7 @@
         <button id="playTop" class="btn" hidden>最初から</button>
         <label class="muted"><input type="checkbox" id="skipBack" checked> 後付けを飛ばす</label>
         <label class="muted"><input type="checkbox" id="showJa" checked> 訳</label></p>
-      <p><button id="figBtn" class="btn" hidden>図・表・数式</button> <button id="marksBtn" class="btn" hidden>★ 印</button></p>
+      <p><button id="figBtn" class="btn" hidden>図・表・数式</button> <button id="marksBtn" class="btn" hidden>★ 印</button> <button id="dcOpen" class="btn">✎ ディクテーション</button></p>
       <div id="figPanel" hidden><div id="figGrid" class="figgrid"></div></div>
       <div id="marksPanel" hidden><p class="muted small">印は Mac に戻すと、Mac で Markdown に書き出せます。押すとその文から再生します。</p><ol id="marksList" class="markslist"></ol></div>
       <ol id="sections" class="sections"></ol>
@@ -140,6 +140,22 @@
     <p class="muted" id="version"></p>
   </section>
 </main>
+
+<!-- ディクテーション（文を聞いて、ランダムに空けた語を打つ）-->
+<div id="dictPanel" class="dictpanel" hidden>
+  <div class="dc-head"><b>ディクテーション</b> <button id="dcClose" class="btn">閉じる</button></div>
+  <div class="dc-levels modes" id="dcLevels"></div>
+  <div class="dc-opts"><select id="dcScope"></select> <select id="dcOrder"><option value="seq">順に</option><option value="rand">ランダム</option></select></div>
+  <p id="dcAdvice" class="dc-advice" hidden></p>
+  <div class="muted small" id="dcWhere"></div>
+  <div class="dc-audio"><button id="dcPlay" class="primary">🔈 もう一度</button> <button id="dcSlow" class="btn">🐢 ゆっくり</button>
+    <button id="dcJaBtn" class="btn">押して訳を表示</button></div>
+  <p id="dcJa" class="dc-ja" hidden></p>
+  <div id="dcText" class="dc-text"></div>
+  <div id="dcResult" class="dc-result" hidden></div>
+  <div class="dc-actions"><button id="dcCheck" class="primary">答え合わせ</button><button id="dcNext" class="primary" hidden>次へ</button>
+    <button id="dcSkip" class="btn">飛ばす</button> <span id="dcStat" class="muted small"></span></div>
+</div>
 
 <!-- 再生バー -->
 <div id="player" class="player" hidden>

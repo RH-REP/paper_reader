@@ -129,6 +129,7 @@
       <p class="audioline"><button id="figBtn" class="small" hidden>図・表・数式</button>
         <button id="marksBtn" class="small" hidden>★ 印</button>
         <button id="termsBtn" class="small" hidden>用語</button>
+        <button id="dictBtn" class="small" title="文を聞いて、空欄の語を打つ">✎ ディクテーション</button>
         <button id="editBtn" class="small" aria-pressed="false" title="見出しの段を上げ下げ・章を分ける・つなぐ・名前を変える">章を編集</button>
         <button id="aiBtn" class="small">AI に手直しを頼む（プロンプトをコピー）</button>
         <span id="manualTag" class="muted"></span></p>
@@ -203,6 +204,25 @@
     </section>
     </div>
   </main>
+</div>
+
+<div id="dictPanel" class="dictpanel" hidden>
+  <div class="dc-head">
+    <b>ディクテーション</b>
+    <span class="modes" id="dcLevels"></span>
+    <label>範囲 <select id="dcScope"></select></label>
+    <label>順番 <select id="dcOrder"><option value="seq">順に</option><option value="rand">ランダム</option></select></label>
+    <span id="dcStat" class="muted"></span>
+    <button id="dcClose" class="small">閉じる <kbd>Esc</kbd></button>
+  </div>
+  <p id="dcAdvice" class="dc-advice" hidden></p>
+  <div class="dc-where muted" id="dcWhere"></div>
+  <div class="dc-audio"><button id="dcPlay" class="primary">🔈 もう一度 <kbd>⌘R</kbd></button> <button id="dcSlow">🐢 ゆっくり</button>
+    <button id="dcJaBtn">押して訳を表示</button> <span id="dcJa" class="dc-ja" hidden></span></div>
+  <div id="dcText" class="dc-text"></div>
+  <div id="dcResult" class="dc-result" hidden></div>
+  <div class="dc-actions"><button id="dcCheck" class="primary">答え合わせ <kbd>Enter</kbd></button>
+    <button id="dcNext" class="primary" hidden>次へ <kbd>Enter</kbd></button> <button id="dcSkip" class="small">飛ばす</button></div>
 </div>
 
 <dialog id="pronDlg" class="pastedlg">

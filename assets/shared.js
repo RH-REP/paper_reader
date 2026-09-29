@@ -183,3 +183,78 @@ export function pickExample(card) {
   const pool = withJa.length ? withJa : list;
   return pool[(card.reviews || 0) % pool.length];
 }
+
+// ---- ディクテーション（聞き取って空欄に打つ）----
+const STOP = new Set(("a an the of to in on at by for from with and or but as is are was were be been being it its this that these those " +
+  "we our they their he she his her which who whom whose what when where how than then so such not no can could may might " +
+  "will would shall should must do does did has have had into onto over under about also there here if while both each").split(" "));
+
+// 文 → [{t, word}]（word は空欄にできる英語の語。数字・記号・空白は word でない）
+export function tokenize(sentence) {
+  const out = [];
+  for (const part of String(sentence).split(/([A-Za-z](?:[A-Za-z'’\-]*[A-Za-z])?)/)) {
+    if (part) out.push({ t: part, word: /^[A-Za-z]/.test(part) });
+  }
+  return out;
+}
+
+// レベルごとの空欄（どれもランダム。用語集などの生成物には頼らない）:
+//   1 = 内容語から1語、2 = 内容語の約2割、3 = 約4割、4 = 内容語すべて、5 = 文全体
+// 返り値は空欄にするトークンの番号の Set。rand は 0〜1 を返す関数（テストで固定できる）
+export function pickBlanks(tokens, level, { rand = Math.random } = {}) {
+  const words = tokens.map((x, i) => ({ ...x, i })).filter((x) => x.word);
+  if (level >= 5) return new Set(words.map((x) => x.i));
+  const isAcr = (t) => /^[A-Z0-9]{2,}s?$/.test(t);
+  const content = words.filter((x) => !STOP.has(x.t.toLowerCase()) && x.t.length >= 3 && (level >= 4 || !isAcr(x.t)));
+  const pool = content.length ? content : words;
+  if (!pool.length) return new Set();
+  if (level >= 4) return new Set(pool.map((x) => x.i));
+  const shuffled = [...pool];
+  for (let k = shuffled.length - 1; k > 0; k--) {       // 偏りの無い並べ替え（Fisher–Yates）
+    const r = Math.floor(rand() * (k + 1));
+    [shuffled[k], shuffled[r]] = [shuffled[r], shuffled[k]];
+  }
+  if (level <= 1) return new Set([shuffled[0].i]);
+  const n = Math.max(level === 2 ? 1 : 2, Math.round(pool.length * (level === 2 ? 0.2 : 0.4)));
+  return new Set(shuffled.slice(0, n).map((x) => x.i));
+}
+
+// 1語の判定: ok（大文字小文字を除いて一致）/ near（1字違い・別の活用形）/ ng
+export function gradeWord(typed, answer) {
+  const x = String(typed || "").trim().replace(/[’]/g, "'").toLowerCase(), a = answer.replace(/[’]/g, "'").toLowerCase();
+  if (!x) return "ng";
+  if (x === a) return "ok";
+  const r = checkCloze(x, answer, answer);
+  return r === "wrong" ? "ng" : "near";
+}
+
+// 文全体のディクテーション: 打った文と元の文を語の並びで突き合わせる（最長共通部分列）。
+// 返り値 {words: [{t, r: ok|near|ng}], extra: [打ったが元に無い語], score: 0〜1}
+export function gradeSentence(typed, sentence) {
+  const orig = tokenize(sentence).filter((x) => x.word).map((x) => x.t);
+  const got = tokenize(typed).filter((x) => x.word).map((x) => x.t);
+  const n = orig.length, m = got.length;
+  const eq = (a, b) => gradeWord(b, a) !== "ng";
+  const L = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+    L[i][j] = eq(orig[i], got[j]) ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const words = [], extra = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (eq(orig[i], got[j])) { words.push({ t: orig[i], r: gradeWord(got[j], orig[i]) }); i++; j++; }
+    else if (L[i + 1][j] >= L[i][j + 1]) { words.push({ t: orig[i], r: "ng" }); i++; }
+    else { extra.push(got[j]); j++; }
+  }
+  while (i < n) words.push({ t: orig[i++], r: "ng" });
+  while (j < m) extra.push(got[j++]);
+  const pts = words.reduce((s, w) => s + (w.r === "ok" ? 1 : w.r === "near" ? 0.5 : 0), 0);
+  return { words, extra, score: n ? pts / n : 0 };
+}
+
+// 直近の正解率からレベルの案内（直近 20 文、10 文以上たまってから）: 9 割超なら上げる、5 割未満なら下げる（決めるのは人）
+export function levelAdvice(history, level) {
+  const recent = history.filter((h) => h.level === level).slice(-20);
+  if (recent.length < 10) return { rate: recent.length ? recent.reduce((s, h) => s + h.score, 0) / recent.length : null, n: recent.length, advice: null };
+  const rate = recent.reduce((s, h) => s + h.score, 0) / recent.length;
+  return { rate, n: recent.length, advice: rate > 0.9 && level < 5 ? "up" : rate < 0.5 && level > 1 ? "down" : null };
+}

@@ -67,6 +67,34 @@ class ClozeJsTest(unittest.TestCase):
         self.assertEqual(o["cite"]["after"], " moved as in.")                         # 問題の文から引用を外す
 
 
+@unittest.skipUnless(shutil.which("node"), "node が無い")
+class DictationJsTest(unittest.TestCase):
+    def test_blanks_levels_and_grading(self):
+        js = f'import * as S from "{(HERE / "assets" / "shared.js").as_posix()}";\n' + r"""
+const t = S.tokenize("Deformable mirrors correct the wavefront of light in the 3 large telescopes of 2020.");
+let seed = 7; const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const sizes = [1, 2, 3, 4, 5].map((lv) => S.pickBlanks(t, lv, { rand }).size);
+const words = t.filter((x) => x.word).length;
+const blanked = [...S.pickBlanks(t, 4, { rand })].map((i) => t[i].t);
+const counts = {}; for (let k = 0; k < 3000; k++) { const i = [...S.pickBlanks(t, 1)][0]; counts[t[i].t] = (counts[t[i].t] || 0) + 1; }
+console.log(JSON.stringify({ sizes, words, blanked, spread: Object.keys(counts).length, min: Math.min(...Object.values(counts)),
+  g: [S.gradeWord("Mirrors", "mirrors"), S.gradeWord("mirror", "mirrors"), S.gradeWord("xx", "mirrors"), S.gradeWord("", "mirrors")],
+  full: S.gradeSentence("deformable mirors correct wavefront of light in the large telescopes extra", "Deformable mirrors correct the wavefront of light."),
+  adv: [S.levelAdvice(Array(12).fill({ level: 2, score: 0.95 }), 2).advice, S.levelAdvice(Array(12).fill({ level: 3, score: 0.3 }), 3).advice,
+        S.levelAdvice(Array(5).fill({ level: 2, score: 1 }), 2).advice] }));"""
+        r = subprocess.run(["node", "--input-type=module", "-e", js], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        o = json.loads(r.stdout)
+        self.assertEqual(o["sizes"][0], 1)
+        self.assertTrue(o["sizes"][0] <= o["sizes"][1] <= o["sizes"][2] <= o["sizes"][3] < o["sizes"][4] == o["words"])   # レベルで空欄が増える
+        self.assertTrue({"the", "of", "in"}.isdisjoint(o["blanked"]))            # Lv4 は内容語だけ（数字も空欄にしない）
+        self.assertEqual((o["spread"], o["min"] > 200), (7, True))               # Lv1 の1語はランダムで偏りが無い（7語×約430回）
+        self.assertEqual(o["g"], ["ok", "near", "ng", "ng"])
+        self.assertEqual([w["r"] for w in o["full"]["words"]], ["ok", "near", "ok", "ng", "ok", "ok", "ok"])   # 抜けた the は ×
+        self.assertEqual(o["full"]["extra"][-1], "extra")
+        self.assertEqual(o["adv"], ["up", "down", None])                          # 10 文たまるまでは案内しない
+
+
 class ClozeServerTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
