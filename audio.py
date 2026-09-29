@@ -30,7 +30,8 @@ DATA_FORMAT = f"LEI16@{RATE_HZ}"
 GAP_AFTER_HEADING = 0.7
 GAP_AFTER_SENTENCE = 0.35
 GAP_BETWEEN_SECTIONS = 1.0
-DEFAULT_VOICE = "Daniel"          # イギリス英語。最初のデモ（ブラウザ読み上げ）と同じ声で、流暢に聞こえる
+DEFAULT_VOICE = "Ava (Premium)"   # 滑らかな声（システム設定で追加する Premium 版）。入っていなければ FALLBACK_VOICES の順に使う
+FALLBACK_VOICES = ("Daniel", "Samantha")   # どの Mac にもある声。Daniel はイギリス英語で流暢に聞こえる
 BITRATE = 64000                   # 22.05kHz モノラルの AAC で上げられる上限
 
 
@@ -51,7 +52,7 @@ def voices() -> list[dict]:
 
 def resolve_voice(want: str | None) -> str | None:
     names = [v["name"] for v in voices()]
-    for v in (want, DEFAULT_VOICE, "Samantha"):
+    for v in (want, DEFAULT_VOICE, *FALLBACK_VOICES):
         if v and v in names:
             return v
     return names[0] if names else None
