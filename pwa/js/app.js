@@ -6,7 +6,7 @@ import * as srs from "./srs.js";
 import { unzipStored, text } from "./zip.js";
 import { fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating } from "./shared.js";
 
-const VERSION = "11";
+const VERSION = "12";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };

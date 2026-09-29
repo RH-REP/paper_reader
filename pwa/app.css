@@ -157,3 +157,9 @@ a.fr.missing{color:inherit;text-decoration:none}
 .player .prow.ctrl .seek,.player .prow.ctrl .icon{min-width:0;width:100%}
 .player #pause{aspect-ratio:1;flex:none;padding:0;line-height:1}
 .stopbtn{font-size:14px;padding:6px 12px}
+/* 各文の ▶ を大きく（指で押しやすく） */
+.sec ol li .sp{width:42px;height:42px;padding:0;font-size:17px;margin:0 8px 0 0;border-radius:50%;vertical-align:-13px;
+  display:inline-flex;align-items:center;justify-content:center;color:var(--accent);border:1.5px solid var(--accent);background:var(--panel)}
+.sec ol li .sp:active{background:var(--accent);color:#fff}
+.sec ol li{margin:12px 0}
+.sec ol li .mk{font-size:22px;min-width:32px;min-height:40px}
