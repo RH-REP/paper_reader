@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """手直しした sentences.json を確かめる（AI に手直しを頼むプロンプトから呼ぶ）。
 
-  python3 tools/check_paper.py <論文のフォルダ（data/papers/<id>）>
+  python3 tools/check_paper.py <論文のフォルダ（data/papers/<id>）> [--quiz-only]
 
 エラー（app が読めない）があれば終了コード 1。警告は、PDF どおりなら残ってよいもの。
 """
@@ -67,7 +67,7 @@ def check(folder: Path) -> int:
         print(f"エラー: JSON として読めない: {e}")
         return 1
     errors, warns = [], []
-    if not isinstance(paper.get("manual"), dict):
+    if not isinstance(paper.get("manual"), dict) and not QUIZ_ONLY:
         errors.append('最上位に "manual": {"by": "ai", "at": ..., "notes": ...} が無い（無いと自動の取り出し直しで上書きされる）')
     paper, errs = normalize(paper)
     errors += errs
@@ -148,8 +148,12 @@ def check(folder: Path) -> int:
     return 0
 
 
+QUIZ_ONLY = False
+
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    args = [a for a in sys.argv[1:] if a != "--quiz-only"]
+    QUIZ_ONLY = "--quiz-only" in sys.argv[1:]          # 理解クイズだけを作ったとき（手直ししていない文書でも manual を求めない）
+    if len(args) != 1:
         print(__doc__)
         sys.exit(2)
-    sys.exit(check(Path(sys.argv[1])))
+    sys.exit(check(Path(args[0])))

@@ -226,7 +226,7 @@ class App:
                 "sentences.json（章と文）を読み、**理解クイズ（quiz.json）だけ**を作ってください。"
                 "sentences.json・figures.json などほかのファイルは変えないでください。\n\n"
                 + (m.group(0) if m else "") +
-                f"\n作ったら、次のコマンドでエラーが無いことを確かめる:\n   {check.group(1) if check else ''}\n")
+                f"\n作ったら、次のコマンドでエラーが無いことを確かめる:\n   {check.group(1) + ' --quiz-only' if check else ''}\n")
         return d, body
 
     def start_ai_fix(self, pid: str, task: str = "fix") -> dict:
