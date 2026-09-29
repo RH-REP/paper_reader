@@ -58,13 +58,16 @@ def resolve_voice(want: str | None) -> str | None:
 
 
 def items(paper: dict) -> list[dict]:
-    """読み上げる単位の一覧（見出し＋文）。画面の再生順と同じ。"""
+    """読み上げる単位の一覧（見出し＋文）。画面の再生順と同じ。
+    読み方は、その論文だけの読み方（sentences.json の "pronunciations"。AI の手直しで付ける）→ 自分の辞書 → 組み込み の順に直す。"""
+    local = pronounce.Pronouncer.from_rules(paper.get("pronunciations") or [])
+    say = lambda t: PRONOUNCER.apply(local.apply_rules(t))
     out = []
     for sec in paper["sections"]:
-        out.append({"id": f"{sec['id']}_h", "sec": sec["id"], "text": PRONOUNCER.apply(sec["speech_title"]), "heading": True})
+        out.append({"id": f"{sec['id']}_h", "sec": sec["id"], "text": say(sec["speech_title"]), "heading": True})
         for k, s in enumerate(sec["sentences"], 1):
             if s["s"]:
-                out.append({"id": f"{sec['id']}_{k}", "sec": sec["id"], "text": PRONOUNCER.apply(s["s"]), "heading": False})
+                out.append({"id": f"{sec['id']}_{k}", "sec": sec["id"], "text": say(s["s"]), "heading": False})
     return out
 
 

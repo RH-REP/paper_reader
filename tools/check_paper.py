@@ -13,6 +13,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 import figures  # noqa: E402
+import audio  # noqa: E402
+import pronounce  # noqa: E402
 import quality  # noqa: E402
 from store import normalize  # noqa: E402
 
@@ -80,6 +82,13 @@ def check(folder: Path) -> int:
     warns += fwarns
     if ferrs:
         return 1
+    # 読み上げで読み違えそうな所（論文ごとの読み方・自分の辞書・組み込みの直しのあとの、音声に渡す文で数える）
+    audio.PRONOUNCER = pronounce.Pronouncer(folder.parent.parent / "pronunciations.json")
+    risks = quality.speech_risks([it["text"] for it in audio.items(paper)])
+    print("読み上げの気になる所: " + "、".join(f"{quality.RISKS[k][1].split('（')[0]} {v['count']}" for k, v in risks.items()))
+    for k, v in risks.items():
+        if v["count"]:
+            print(f"  {k}: 例 {', '.join(v['examples'][:8])}")
     for w in warns[:80]:
         print("警告:", w)
     if len(warns) > 80:

@@ -108,8 +108,22 @@ class Pronouncer:
         self._mtime = None
         return clean
 
-    def apply(self, text: str) -> str:
+    @classmethod
+    def from_rules(cls, rules: list[dict]) -> "Pronouncer":
+        """ファイルを持たない読み方（論文ごとの読み方。sentences.json の "pronunciations"）。"""
+        p = cls(None)
+        p._rules = [r for r in rules if isinstance(r, dict) and str(r.get("from", "")).strip() and str(r.get("to", "")).strip()]
+        for r in p._rules:
+            r.setdefault("case", any(c.isupper() for c in r["from"]))
+        p._compile()
+        return p
+
+    def apply_rules(self, text: str) -> str:
+        """自分の辞書の置き換えだけ（組み込みの直しはしない）。"""
         self._load()
         for rx, to in self._re or []:
             text = rx.sub(to, text)
-        return builtin(text)
+        return text
+
+    def apply(self, text: str) -> str:
+        return builtin(self.apply_rules(text))

@@ -25,10 +25,27 @@ PDF から自動で取り出した「章と文」（sentences.json）に誤り�
 4. **文の切れ目**: sentences の1要素は1文。Eq. / Fig. / Ref. / et al. / e.g. / i.e. / 「(b) and (c)」で切らない。2文が1つにつながっていたら分ける
 5. **混ざったものを外す**: 図表の説明（"Fig. 3. …"）、表の中身、ページのヘッダー・フッター・ページ番号、著者名・所属、受付日、著作権表示、脚注番号の切れ端は文から外す
 6. **抜けを補う**: PDF にあるのに抜けている本文（取り出し漏れ・画像だけのページ）は補う。段組みの読む順番が入れ替わっていたら直す
-7. **数式**: 画面に出す t は PDF の見た目に近い形で残してよい。読み上げる s では、式を "(equation)" に置き換え、文字化け（ð, Þ, 1⁄4, � など）を s に残さない
+7. **数式**: 画面に出す t は PDF の見た目に近い形で残してよい。読み上げる s では、短い式（1行に収まる程度）は下の「読み上げ（発音）」のとおり言葉で書き、
+   長くて聞いても分からない式だけ "(equation)" に置き換える。文字化け（ð, Þ, 1⁄4, � など）を s に残さない
 8. **読み上げる文 s**: t から、年を含む括弧の引用（Smith et al., 2020）と [12] 型の引用、上付きの引用番号を除いたもの（式は 7 のとおり）。
    ただし「in [12]」「see [3]」のように引用が文の語として使われ、除くと文が壊れるときは「reference 12」と読ませる。
    行内の1文字の変数（λ、r₀）は言葉にしてよい（lambda、r zero）。s を空文字 "" にすると、その文は読み上げない（表の切れ端などに使う）
+
+## 読み上げ（発音）
+音声は macOS の say で作る。say は記号・略語・文字と数字の混ざった語を読み違えやすいので、**読み上げる文 s と、この論文だけの読み方（pronunciations）**で直す。画面に出す t は変えない。
+1. **式を言葉で書く**（s）: 「σ²_fitting = k (D/r₀)^(5/3) N^(−5/6) (2)」→「sigma squared fitting equals k, times D over r zero to the power five thirds, times N to the power minus five sixths, equation two,」。
+   = は equals、/ は over、^ は to the power、√ は the square root of、分数は five thirds のように。区切りに読点（,）を入れると聞きやすい。式番号は「equation two」
+2. **記号を言葉に**（s）: 「>10」→「more than 10」、「<1」→「less than 1」、「N=95」→「N equals 95」、「μm/kV」→「micrometers per kilovolt」。
+   URL・化学式（Pb(Zr, Ti)O3 など）・表の番号のような読んでも意味の無いものは s から外す
+3. **この論文だけの読み方**: sentences.json の最上位に "pronunciations": [{"from": "DM", "to": "D M", "case": true}, …] を書く（語全体に合うときだけ置き換わる。大文字の語は case: true）
+   - 略語は、文字ごとに読むもの（DM → "D M"、JWST → "J W S T"）と、語として読むもの（MEMS → "mems"、ALPAO → "al-pao"）を分けて書く。複数形は別に登録（DMs → "D M's"）
+   - ハイフンでつながった語は、その形で別に登録する（E-ELT → "E E L T"、AOA-Xinetics → "A O A Xinetics"）。語全体に合うときしか置き換わらないため
+   - 文字と数字の混ざった語: M4 → "M four"、d33 → "d three three"、8m → "8 meter"、11x11 → "11 by 11"、10k → "10 thousand"
+   - 本文で定義された略語は、その意味で読ませてもよい（SR を「Strehl ratio」）
+   - 単位（7 μm、300 K、J/cm²）・上付き・ギリシャ文字は app が自動で直すので、書かなくてよい
+4. **確かめる**: 確認のコマンドの「読み上げの気になる所」（式・記号・文字と数字の混ざった語・読み方を決めていない略語の数）を、できるだけ 0 にする。
+   残す場合は、報告に理由を書く（PDF の表記のままのほうが自然に読めるなど）
+5. manual に "pronunciation": {"by": "ai", "at": "<作業した今の日時>", "notes": "<直した数>"} を足す
 
 ## 図・表・数式
 自動の抜き出しは、キャプションの近くの画像・線と、右端に番号のある式の行だけ。抜け・範囲の誤り（図の一部しか入っていない、隣の文まで入っている）がある場合がある。PDF の全ページを見て、次のとおり直す。
@@ -68,7 +85,8 @@ PDF から自動で取り出した「章と文」（sentences.json）に誤り�
 ```
 - 最上位の **"manual" を必ず付ける**（これが無いと、app の自動の取り出し直しで上書きされる）
 - "at" には作業した今の日時を入れる（`date -Iseconds` などで調べる。例の形をそのまま写さない）。"notes" には実際に直した内容を書く
-- 上の title / manual / sections / level / kind / sentences / t / s 以外のキー（id, number, speech_title, page, extractor_version など）は残しても消してもよい（app が付け直す）
+- この論文だけの読み方は最上位の "pronunciations"（上の「読み上げ（発音）」の 3）
+- 上の title / manual / pronunciations / sections / level / kind / sentences / t / s 以外のキー（id, number, speech_title, page, extractor_version など）は残しても消してもよい（app が付け直す）
 - UTF-8 の正しい JSON にする
 
 app は次にこの論文を開いたとき、文が変わったことを見つけて音声と訳を作り直し、図・表・数式は figures.json のとおりに表示します。

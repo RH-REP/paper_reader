@@ -168,3 +168,25 @@ class GlossaryTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PaperPronunciationTest(unittest.TestCase):
+    """論文ごとの読み方（sentences.json の "pronunciations"）と、読み上げの気になる所の数え方。"""
+
+    def test_per_paper_rules_and_risks(self):
+        import quality
+        paper = {"pronunciations": [{"from": "DM", "to": "D M"}, {"from": "DMs", "to": "D M's"}, {"from": "M4", "to": "M four"},
+                                    {"from": "E-ELT", "to": "E E L T"}],
+                 "sections": [{"id": "s0", "speech_title": "Intro.", "sentences": [
+                     {"t": "x", "s": "The DM and DMs of the E-ELT, M4 and the ADS mirror."},
+                     {"t": "y", "s": "It gives (equation) and N=95 with 11x11 actuators."}]}]}
+        old = audio.PRONOUNCER
+        try:
+            audio.PRONOUNCER = pronounce.Pronouncer(None)
+            texts = [it["text"] for it in audio.items(paper)]
+        finally:
+            audio.PRONOUNCER = old
+        self.assertEqual(texts[1], "The D M and D M's of the E E L T, M four and the ADS mirror.")
+        r = quality.speech_risks(texts)
+        self.assertEqual((r["equation"]["count"], r["symbol"]["count"], r["mixed"]["count"], r["acronym"]["count"]), (1, 1, 1, 1))
+        self.assertEqual(r["acronym"]["examples"], ["ADS"])                            # 読み方を決めていない略語だけ

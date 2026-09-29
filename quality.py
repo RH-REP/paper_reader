@@ -137,3 +137,28 @@ def summary(issues: list[dict]) -> dict:
     major = [i for i in issues if i["level"] == "major"]
     return {"major": len(major), "minor": len(issues) - len(major), "recommend": bool(major),
             "top": (major + [i for i in issues if i["level"] == "minor"])[:8]}
+
+
+# ---- 読み上げで読み違えそうな所（音声に渡す文で数える）----
+RISKS = {
+    "equation": (re.compile(r"\(equation\)"), "式を「(equation)」と読む（短い式は言葉で書ける）"),
+    "symbol": (re.compile(r"[_^=<>≈~√∑∫∂/\\|²³⁰¹⁴⁵⁶⁷⁸⁹⁻⁺₀₁₂₃₄₅₆₇₈₉]"), "記号・上付き・下付きが残っている（say が読まないか、変に読む）"),
+    "mixed": (re.compile(r"\b(?![0-9]+s\b)(?=[A-Za-z]*[0-9])(?=[0-9]*[A-Za-z])[A-Za-z0-9]+\b"), "文字と数字の混ざった語（M4、d33、8m、11x11 など）"),
+    "acronym": (re.compile(r"\b[A-Z][A-Z0-9]{1,6}s?\b"), "読み方を決めていない略語（文字ごとに読むか、語として読むかが声で変わる）"),
+}
+
+
+def speech_risks(spoken_texts: list[str], known: set[str] | None = None) -> dict:
+    """音声に渡す文（読み方の直しのあと）の中の、読み違えそうな所の数と例。known は読み方を決めた略語。"""
+    out = {k: {"count": 0, "examples": []} for k in RISKS}
+    for t in spoken_texts:
+        for k, (rx, _) in RISKS.items():
+            hits = [m.group(0) for m in rx.finditer(t)]
+            if k == "acronym":
+                hits = [h for h in hits if h not in (known or set())]
+            if hits:
+                out[k]["count"] += len(hits)
+                for h in hits:
+                    if h not in out[k]["examples"] and len(out[k]["examples"]) < 12:
+                        out[k]["examples"].append(h)
+    return out
