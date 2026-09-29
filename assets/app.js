@@ -310,6 +310,15 @@ function renderSections() {
     count.className = "count";
     count.textContent = `${sec.sentences.length}文` + (p.has_pdf ? ` ・ p.${sec.page}` : "");
     head.append(btn, name, count);
+    const qz = sec.level === 1 && quizChapter(S.quiz, sec.title);
+    if (qz) {                                          // この章の理解クイズへすぐ
+      const qb = document.createElement("button");
+      qb.className = "qzgo";
+      qb.textContent = `？ クイズ ${qz.questions.length}問`;
+      qb.title = "この章の理解クイズ";
+      qb.onclick = () => openQuiz(sec.title);
+      head.appendChild(qb);
+    }
     if (S.editing) head.appendChild(editControls(sec, i));
     const f = S.audio?.state === "done" && chapterFile(sec);
     if (f) {
@@ -763,6 +772,7 @@ async function loadQuiz() {
   $("quizBtn").hidden = !n;
   $("quizBtn").textContent = `？ 理解クイズ（${S.quiz.chapters.length}章・${n}問）`;
   $("quizMakeBtn").hidden = !!n || !S.paper.ai_fix?.available || S.paper.ai_fix?.state === "running";
+  if (n) renderSections();                           // 章の見出しに「？ クイズ」を出す
 }
 function quizHist() { return pref.get("quizHistory", []); }
 function openQuiz(title = null, opts = {}) {

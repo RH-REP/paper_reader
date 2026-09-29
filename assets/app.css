@@ -268,3 +268,5 @@ a.fr.missing{color:inherit;text-decoration:none;cursor:text}
 .qz-after{font-size:14.5px;line-height:1.7;background:var(--bg);border-radius:8px;padding:10px 14px}
 .qz-after .ev{margin:6px 0 0;color:var(--ink2)}
 .qz-after .ev button{margin-right:6px}
+.sec .qzgo{font-size:12.5px;padding:3px 10px;border-radius:99px;color:var(--accent);border:1px solid var(--accent);background:var(--panel);white-space:nowrap}
+.sec .qzgo:hover{background:var(--accent);color:var(--accent-ink)}

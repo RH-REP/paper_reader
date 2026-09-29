@@ -7,7 +7,7 @@ import { unzipStored, text } from "./zip.js";
 import { chapterTitle, findSentenceId, quizChapter, attachZoom, fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating,
          tokenize, pickBlanks, gradeWord, gradeSentence, levelAdvice } from "./shared.js";
 
-const VERSION = "14";
+const VERSION = "15";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
@@ -117,6 +117,14 @@ async function openPaper(id) {
     c.className = "count";
     c.textContent = `${sec.sentences.length}文`;
     head.append(b, name, c);
+    const qz = sec.level === 1 && quizChapter(p.quiz, sec.title);
+    if (qz) {                                          // この章の理解クイズへすぐ
+      const qb = document.createElement("button");
+      qb.className = "qzgo";
+      qb.textContent = `？ ${qz.questions.length}問`;
+      qb.onclick = () => openQuiz(sec.title);
+      head.appendChild(qb);
+    }
     li.appendChild(head);
     if (sec.sentences.length) {
       const det = document.createElement("details");
