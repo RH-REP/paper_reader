@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""架空の2段組論文 samples/sample_paper.pdf を作る（開発・テスト用。実在の論文は app_dev に入れない）。
+"""架空の2段組論文 samples/sample_paper.pdf を作る（開発・テスト用。実在の論文はこのリポジトリに入れない）。
 
   python3 tools/make_sample_pdf.py            # samples/sample_paper.pdf
   python3 tools/make_sample_pdf.py --scan     # 同じ内容を画像だけにした samples/sample_scan.pdf も作る（OCR の確認用）
