@@ -7,7 +7,7 @@ import { unzipStored, text } from "./zip.js";
 import { chapterTitle, findSentenceId, quizChapter, attachZoom, fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating,
          tokenize, pickBlanks, gradeWord, gradeSentence, levelAdvice } from "./shared.js";
 
-const VERSION = "16";
+const VERSION = "17";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
@@ -836,7 +836,7 @@ function dcShow() {
     DC.inputs.push(ta);
   } else {
     DC.tokens.forEach((x, i) => {
-      if (!DC.blanks.has(i)) { box.append(x.t); return; }
+      if (!DC.blanks.has(i)) { if (!x.word) { box.append(x.t); return; } const w = document.createElement("span"); w.className = "w"; w.textContent = x.t; box.appendChild(w); return; }   // 見えている語はタップで辞書
       const inp = document.createElement("input");
       inp.spellcheck = false;
       inp.autocomplete = "off";
@@ -877,11 +877,52 @@ function dcCheckOne(inp) {
 function dcWordSpan(t, r, typed) {
   const frag = document.createDocumentFragment();
   const sp = document.createElement("span");
-  sp.className = `dc-w w ${r}`;                  // .w: 押すと辞書（外した語を単語帳に登録できる）
+  sp.className = `dc-w w ${r}`;                  // .w: タップで辞書
   sp.textContent = t;
   frag.appendChild(sp);
   if (typed && r !== "ok") { const y = document.createElement("span"); y.className = "dc-you"; y.textContent = typed; frag.appendChild(y); }
+  const b = document.createElement("button");    // ＋: 辞書を開かずにすぐ単語帳へ（この文が例文）
+  b.className = "dc-add";
+  b.dataset.w = t;
+  b.textContent = "＋";
+  b.setAttribute("aria-label", `${t} を単語帳に登録`);
+  b.onclick = (e) => { e.stopPropagation(); dcRegister([t]); };
+  frag.appendChild(b);
+  db.get("words", t.toLowerCase()).then((x) => { if (x) { b.textContent = "✓"; b.disabled = true; } });
   return frag;
+}
+// 単語帳に登録（スマホの辞書・用語集で引く。無い語は登録できない）
+async function dcRegister(words) {
+  const it = DC.items[DC.pos];
+  let ok = 0;
+  const ng = [], done = new Set();
+  for (const w of words) {
+    const r = glossaryLookup(await lookup(w), w);
+    if (!r.found) { ng.push(w); continue; }
+    await recordLookup(r, { section: it?.sec.title, sentence: it?.t });
+    done.add(w);
+    ok++;
+  }
+  for (const b of $("dcText").querySelectorAll(".dc-add")) {
+    if (ng.includes(b.dataset.w)) { b.textContent = "辞書に無い"; b.disabled = true; }
+    else if (done.has(b.dataset.w)) { b.textContent = "✓"; b.disabled = true; }
+  }
+  dcBulkButton();
+  return { ok, ng };
+}
+function dcBulkButton() {
+  const res = $("dcResult");
+  if (res.querySelector(".dc-bulk")?.dataset.done) return;     // まとめて登録した結果の表示は残す
+  res.querySelector(".dc-bulk")?.remove();
+  if (res.hidden) return;
+  const missed = [...new Set([...$("dcText").querySelectorAll(".dc-w.ng, .dc-w.near")].map((x) => x.textContent))]
+    .filter((w) => !$("dcText").querySelector(`.dc-add[data-w="${CSS.escape(w)}"]`)?.disabled);
+  if (!missed.length) return;
+  const b = document.createElement("button");
+  b.className = "btn dc-bulk";
+  b.textContent = `外した語をまとめて単語帳に（${missed.length}語）`;
+  b.onclick = async () => { b.disabled = true; b.dataset.done = "1"; const r = await dcRegister(missed); b.textContent = `${r.ok}語を登録${r.ng.length ? `（辞書に無い ${r.ng.length}語）` : ""}`; };
+  res.appendChild(b);
 }
 async function dcCheck() {
   const it = DC.items[DC.pos];
@@ -925,7 +966,8 @@ async function dcCheck() {
   res.textContent = "";
   res.insertAdjacentHTML("beforeend", `<b>${Math.round(score * 100)}%</b>　○ ${nOk}　△ ${nNear}　× ${nNg}`);
   if (extra.length) { const e = document.createElement("div"); e.className = "muted small"; e.textContent = `元の文に無い語: ${extra.join(", ")}`; res.appendChild(e); }
-  res.insertAdjacentHTML("beforeend", '<div class="muted small">語をタップすると辞書（単語帳に登録できる）。△ は1字違いか別の形。</div>');
+  res.insertAdjacentHTML("beforeend", '<div class="muted small">語をタップすると辞書。空欄だった語の「＋」で、すぐ単語帳に登録（この文が例文）。△ は1字違いか別の形。</div>');
+  setTimeout(dcBulkButton, 50);                     // 「＋」が登録済みかを確かめてから出す
   $("dcCheck").hidden = true;
   $("dcNext").hidden = false;
   document.activeElement?.blur();

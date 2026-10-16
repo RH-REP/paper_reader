@@ -786,6 +786,8 @@ function dcShow() {
   const ja = S.paper.ja?.[it.id];
   $("dcJaBtn").disabled = !ja;
   $("dcJaBtn").textContent = ja ? "押して訳を表示" : "（訳なし）";
+  box.dataset.t = it.t;                             // 文の中の語を押したときの例文と章（辞書・単語帳）
+  box.dataset.sec = it.sec.id;
   DC.tokens = tokenize(it.t);
   DC.blanks = pickBlanks(DC.tokens, DC.level);
   DC.inputs = [];
@@ -800,7 +802,7 @@ function dcShow() {
     DC.inputs.push(ta);
   } else {
     DC.tokens.forEach((x, i) => {
-      if (!DC.blanks.has(i)) { box.append(x.t); return; }
+      if (!DC.blanks.has(i)) { box.append(x.word ? dcWord(x.t) : x.t); return; }
       const inp = document.createElement("input");
       inp.spellcheck = false;
       inp.autocomplete = "off";
@@ -840,16 +842,78 @@ function dcCheckOne(inp) {
   if (rest.length) rest[0].focus(); else dcCheck();          // 全部確かめたら結果を出す
 }
 
+// 見えている語: 押すと辞書（読む画面と同じ .w。カードの「単語帳に登録」で登録できる）
+function dcWord(t) {
+  const sp = document.createElement("span");
+  sp.className = "w";
+  sp.textContent = t;
+  return sp;
+}
+
+// 答え合わせ済みの空欄の語: 押すと辞書。横の「＋」で辞書を開かずにすぐ単語帳へ（登録済みは ✓）
 function dcWordSpan(t, r, typed) {
   const sp = document.createElement("span");
-  sp.className = `dc-w ${r}`;
+  sp.className = `dc-w w ${r}`;
   sp.textContent = t;
-  sp.title = r === "ok" ? "正解" : "押すと辞書";
-  if (r !== "ok") sp.onclick = () => lookup(t, { sec: DC.items[DC.pos].sec.title, sentence: DC.items[DC.pos].t });
+  sp.title = "押すと辞書";
   const frag = document.createDocumentFragment();
   frag.appendChild(sp);
   if (typed && r !== "ok") { const y = document.createElement("span"); y.className = "dc-you"; y.textContent = typed; frag.appendChild(y); }
+  frag.appendChild(dcAddButton(t));
   return frag;
+}
+
+function dcAddButton(t) {
+  const b = document.createElement("button");
+  b.className = "dc-add";
+  b.dataset.w = t;
+  const done = S.vocabSet?.has(t.toLowerCase());
+  b.textContent = done ? "✓" : "＋";
+  b.title = done ? "単語帳に登録済み" : "この語を単語帳に登録（この文が例文になる）";
+  b.disabled = !!done;
+  b.addEventListener("mousedown", (e) => e.preventDefault());
+  b.onclick = (e) => { e.stopPropagation(); dcRegister([t]); };
+  return b;
+}
+
+// 単語帳に登録（サーバーで引き直す。辞書・用語集に無い語は登録できない）
+async function dcRegister(words) {
+  const it = DC.items[DC.pos];
+  let ok = 0, ng = [];
+  for (const w of words) {
+    try {
+      const r = await post("/api/vocab/add", { w, paper: S.paper.id, sec: it?.sec.title, sentence: it?.t });
+      S.vocabSet?.add(r.headword.toLowerCase());
+      S.vocabSet?.add(w.toLowerCase());
+      ok++;
+    } catch { ng.push(w); }
+  }
+  for (const b of $("dcText").querySelectorAll(".dc-add")) {
+    const w = b.dataset.w;
+    if (ng.includes(w)) { b.textContent = "辞書に無い"; b.disabled = true; continue; }
+    if (S.vocabSet?.has(w.toLowerCase())) { b.textContent = "✓"; b.disabled = true; b.title = "単語帳に登録済み"; }
+  }
+  dcBulkButton();
+  loadVocab();
+  refreshDue();
+  return { ok, ng };
+}
+
+// 結果の欄: 外した語（△×）をまとめて単語帳に
+function dcBulkButton() {
+  const res = $("dcResult");
+  if (res.querySelector(".dc-bulk")?.dataset.done) return;     // まとめて登録した結果の表示は残す
+  res.querySelector(".dc-bulk")?.remove();
+  if (res.hidden) return;
+  const missed = [...new Set([...$("dcText").querySelectorAll(".dc-w.ng, .dc-w.near")].map((x) => x.textContent))]
+    .filter((w) => !S.vocabSet?.has(w.toLowerCase()) && !$("dcText").querySelector(`.dc-add[data-w="${CSS.escape(w)}"]`)?.disabled);
+  if (!missed.length) return;
+  const b = document.createElement("button");
+  b.className = "small dc-bulk";
+  b.textContent = `外した語をまとめて単語帳に（${missed.length}語）`;
+  b.title = missed.join(", ");
+  b.onclick = async () => { b.disabled = true; b.dataset.done = "1"; const r = await dcRegister(missed); b.textContent = `${r.ok}語を登録${r.ng.length ? `（辞書に無い ${r.ng.length}語）` : ""}`; };
+  res.appendChild(b);
 }
 
 function dcCheck() {
@@ -891,7 +955,8 @@ function dcCheck() {
   res.hidden = false;
   res.innerHTML = `<b>${Math.round(score * 100)}%</b>　○ ${nOk}　△ ${nNear}　× ${nNg}` +
     (extra.length ? `　<span class="muted">元の文に無い語: ${extra.map((x) => x.replace(/[<&]/g, "")).join(", ")}</span>` : "") +
-    `<div class="muted">色の付いた語を押すと辞書（単語帳に登録できる）。△ は1字違いか別の形。</div>`;
+    `<div class="muted">語を押すと辞書。空欄だった語の「＋」で、すぐ単語帳に登録（この文が例文）。△ は1字違いか別の形。</div>`;
+  dcBulkButton();
   $("dcCheck").hidden = true;
   $("dcNext").hidden = false;
   $("dcNext").focus();

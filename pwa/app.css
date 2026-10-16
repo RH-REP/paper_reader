@@ -203,3 +203,7 @@ a.fr.missing{color:inherit;text-decoration:none}
 .dc-btns .btn{min-height:46px}
 .dc-toggle{width:58px;height:58px;border-radius:50%;background:var(--accent);color:#fff;border:none;font-size:24px;padding:0}
 .dc-chk{font-size:13px;min-width:34px;min-height:34px;padding:0 8px;margin:0 6px 0 2px;border-radius:99px;color:var(--accent);vertical-align:1px}
+/* ディクテーションからの単語登録 */
+.dc-add{font-size:13px;min-width:32px;min-height:32px;padding:0 8px;margin:0 6px 0 2px;border-radius:99px;color:var(--accent);vertical-align:1px}
+.dc-add:disabled{color:var(--muted);border-color:transparent;background:none}
+.dc-bulk{margin-top:8px;display:block}
