@@ -1878,7 +1878,7 @@ async function loadPhone() {
   const ul = $("sharePapers");
   ul.innerHTML = "";
   const saved = pref.get("sharePapers", null);
-  const want = new Set(saved && saved.length ? saved : S.papers.map((m) => m.id));   // 初めては全部に印を付ける
+  const want = new Set(Array.isArray(saved) ? saved : S.papers.map((m) => m.id));   // 初めては全部に印を付ける（全部解除した後は外したまま）
   for (const m of S.papers) {
     const li = document.createElement("li");
     li.innerHTML = `<label><input type="checkbox" value="${m.id}"> <span></span></label>`;
@@ -1925,6 +1925,12 @@ $("shareStart").onclick = async () => {
   catch (e) { alert(e.message); }
   finally { $("shareStart").disabled = false; }
 };
+function shareCheckAll(on) {
+  document.querySelectorAll("#sharePapers input").forEach((i) => { i.checked = on; });
+  updateBundleLink();
+}
+$("shareAll").onclick = () => shareCheckAll(true);
+$("shareNone").onclick = () => shareCheckAll(false);
 $("shareStop").onclick = async () => renderShare(await post("/api/share/stop"));
 $("progressInput").onchange = async (e) => {
   const f = e.target.files[0];
