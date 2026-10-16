@@ -73,6 +73,9 @@ class AiFixTest(unittest.TestCase):
         p = self.store.load(self.meta["id"])
         self.assertEqual([s["title"] for s in p["sections"]], ["Abstract", "1. Introduction", "References"])
         self.assertEqual(self.store.list()[0]["sections"], 3)            # 一覧の数も手直し後に合う
+        self.write({**EDITED, "title": "A Fixed Title"})
+        self.store.load(self.meta["id"])
+        self.assertEqual(self.store.list()[0]["title"], "A Fixed Title")  # 一覧の題名も手直し後に合う
         self.store.reextract(self.meta["id"])                            # 明示の取り出し直しは上書きするが退避を残す
         self.assertTrue((self.d / "sentences.manual.json").exists())
         self.assertNotIn("manual", self.store.load(self.meta["id"]))

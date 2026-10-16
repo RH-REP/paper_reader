@@ -198,8 +198,10 @@ class Store:
             if paper.get("manual"):
                 counts = {"sections": len(paper["sections"]),
                           "sentences": sum(len(s["sentences"]) for s in paper["sections"]), "manual": paper["manual"]}
+                if paper.get("title", "").strip():
+                    counts["title"] = paper["title"].strip()
                 if any(meta.get(k) != v for k, v in counts.items()):
-                    meta.update(counts)                  # 一覧の章・文の数を手直し後に合わせる
+                    meta.update(counts)                  # 一覧の題名と章・文の数を手直し後に合わせる
                     _write_json(d / "meta.json", meta)
         return paper
 
