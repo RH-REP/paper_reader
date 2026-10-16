@@ -164,6 +164,11 @@
   <div class="dc-audio"><button id="dcPlay" class="primary">🔈 もう一度</button> <button id="dcSlow" class="btn">🐢 ゆっくり</button>
     <button id="dcJaBtn" class="btn">押して訳を表示</button></div>
   <p id="dcJa" class="dc-ja" hidden></p>
+  <div id="dcPlayer" class="dc-player" hidden>
+    <div class="dc-prog"><span id="dcTCur" class="t">0:00</span><input type="range" id="dcProg" min="0" max="1000" step="1" value="0" aria-label="この文の再生位置"><span id="dcTTot" class="t">0:00</span></div>
+    <div class="dc-btns"><button id="dcBack5" class="btn">−5秒</button><button id="dcBack2" class="btn">−2秒</button>
+      <button id="dcToggle" class="dc-toggle">⏸</button><button id="dcFwd2" class="btn">+2秒</button></div>
+  </div>
   <div id="dcText" class="dc-text"></div>
   <div id="dcResult" class="dc-result" hidden></div>
   <div class="dc-actions"><button id="dcCheck" class="primary">答え合わせ</button><button id="dcNext" class="primary" hidden>次へ</button>

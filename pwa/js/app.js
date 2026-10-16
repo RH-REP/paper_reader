@@ -7,7 +7,7 @@ import { unzipStored, text } from "./zip.js";
 import { chapterTitle, findSentenceId, quizChapter, attachZoom, fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating,
          tokenize, pickBlanks, gradeWord, gradeSentence, levelAdvice } from "./shared.js";
 
-const VERSION = "15";
+const VERSION = "16";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
@@ -796,7 +796,9 @@ async function dcSpeak(rate) {
     DC.audio.src = DC.url;
     DC.audio.playbackRate = r;
     DC.audio.play().catch(() => {});
+    $("dcPlayer").hidden = false;
   } else if ("speechSynthesis" in window) {
+    $("dcPlayer").hidden = true;                    // ブラウザの読み上げは位置を動かせない
     const u = new SpeechSynthesisUtterance(it.s);
     u.lang = "en-US";
     u.rate = r;
@@ -821,6 +823,9 @@ function dcShow() {
   DC.tokens = tokenize(it.t);
   DC.blanks = pickBlanks(DC.tokens, DC.level);
   DC.inputs = [];
+  DC.results = new Map();
+  box.dataset.t = it.t;                             // 答え合わせのあと、語をタップして辞書を引くため
+  box.dataset.sec = it.sec.id;
   if (DC.level >= 5) {
     const ta = document.createElement("textarea");
     ta.rows = 4;
@@ -845,13 +850,30 @@ function dcShow() {
         const k = DC.inputs.indexOf(inp);
         if (k < DC.inputs.length - 1) DC.inputs[k + 1].focus(); else dcCheck();
       };
-      box.appendChild(inp);
+      const chk = document.createElement("button");          // この空欄だけ答え合わせ
+      chk.className = "dc-chk";
+      chk.textContent = "✓";
+      chk.setAttribute("aria-label", "この空欄だけ答え合わせ");
+      chk.onclick = () => dcCheckOne(inp);
+      inp.chk = chk;
+      box.append(inp, chk);
       DC.inputs.push(inp);
     });
     DC.inputs.forEach((x, k) => x.setAttribute("enterkeyhint", k < DC.inputs.length - 1 ? "next" : "done"));
   }
   dcSpeak();
 }
+// 1つの空欄だけ答え合わせ（Mac と同じ）。結果は覚えておき、あとの「答え合わせ」でまとめて数える
+function dcCheckOne(inp) {
+  if (!inp.isConnected || !$("dcNext").hidden) return;
+  const i = Number(inp.dataset.i), ans = DC.tokens[i].t, r = gradeWord(inp.value, ans);
+  DC.results.set(i, r);
+  inp.chk?.remove();
+  inp.replaceWith(dcWordSpan(ans, r, inp.value.trim()));
+  const rest = DC.inputs.filter((x) => x.isConnected);
+  if (rest.length) rest[0].focus(); else dcCheck();
+}
+
 function dcWordSpan(t, r, typed) {
   const frag = document.createDocumentFragment();
   const sp = document.createElement("span");
@@ -882,8 +904,14 @@ async function dcCheck() {
     score = g.score;
   } else {
     for (const inp of DC.inputs) {
-      const ans = DC.tokens[Number(inp.dataset.i)].t, r = gradeWord(inp.value, ans);
-      inp.replaceWith(dcWordSpan(ans, r, inp.value.trim()));
+      const i = Number(inp.dataset.i);
+      let r = DC.results.get(i);                    // 1つずつ確かめた空欄はその結果を使う
+      if (r == null) {
+        const ans = DC.tokens[i].t;
+        r = gradeWord(inp.value, ans);
+        inp.chk?.remove();
+        inp.replaceWith(dcWordSpan(ans, r, inp.value.trim()));
+      }
       r === "ok" ? nOk++ : r === "near" ? nNear++ : nNg++;
     }
     const n = nOk + nNear + nNg;
@@ -928,6 +956,35 @@ $("dcOpen").onclick = () => openDict();
 $("dcClose").onclick = () => { if (history.state?.dict) history.back(); else closeDict(); };
 addEventListener("popstate", closeDict);
 $("dcPlay").onclick = () => dcSpeak();
+// ---- ディクテーションの再生バー（今の文1つの音声。動かすとその位置へ）----
+const fmtS = (v) => { v = Math.max(0, v || 0); return `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, "0")}`; };
+function dcTick() {
+  const a = DC.audio, d = isFinite(a.duration) ? a.duration : 0;
+  if (!DC.dragging) $("dcProg").value = d ? Math.round((a.currentTime / d) * 1000) : 0;
+  $("dcTCur").textContent = fmtS(a.currentTime);
+  $("dcTTot").textContent = fmtS(d);
+  $("dcToggle").textContent = a.paused ? "▶" : "⏸";
+}
+function dcSeek(sec) {
+  const a = DC.audio;
+  if (!a.src || !isFinite(a.duration)) return;
+  a.currentTime = Math.max(0, Math.min(a.duration - 0.05, a.currentTime + sec));
+  if (a.paused) a.play().catch(() => {});
+}
+for (const ev of ["timeupdate", "play", "pause", "ended", "loadedmetadata"]) DC.audio.addEventListener(ev, dcTick);
+$("dcProg").addEventListener("input", () => { DC.dragging = true; $("dcTCur").textContent = fmtS((Number($("dcProg").value) / 1000) * (DC.audio.duration || 0)); });
+$("dcProg").addEventListener("change", () => {
+  DC.dragging = false;
+  if (isFinite(DC.audio.duration)) { DC.audio.currentTime = (Number($("dcProg").value) / 1000) * DC.audio.duration; if (DC.audio.paused) DC.audio.play().catch(() => {}); }
+});
+$("dcBack5").onclick = () => dcSeek(-5);
+$("dcBack2").onclick = () => dcSeek(-2);
+$("dcFwd2").onclick = () => dcSeek(2);
+$("dcToggle").onclick = () => {
+  const a = DC.audio;
+  if (!a.src) return dcSpeak();
+  if (a.ended) { a.currentTime = 0; a.play().catch(() => {}); } else if (a.paused) a.play().catch(() => {}); else a.pause();
+};
 $("dcSlow").onclick = () => dcSpeak(0.75);
 $("dcJaBtn").onclick = () => { $("dcJa").textContent = S.paper.ja?.[DC.items[DC.pos]?.id] || ""; $("dcJa").hidden = false; $("dcJaBtn").hidden = true; };
 $("dcCheck").onclick = dcCheck;

@@ -234,6 +234,11 @@
   <div class="dc-where muted" id="dcWhere"></div>
   <div class="dc-audio"><button id="dcPlay" class="primary">🔈 もう一度 <kbd>⌘R</kbd></button> <button id="dcSlow">🐢 ゆっくり</button>
     <button id="dcJaBtn">押して訳を表示</button> <span id="dcJa" class="dc-ja" hidden></span></div>
+  <div id="dcPlayer" class="dc-player" hidden>
+    <button id="dcBack5" title="5秒戻す（⌃←）">−5秒</button><button id="dcBack2" title="2秒戻す（⌥⌘←）">−2秒</button>
+    <button id="dcToggle" class="dc-toggle" title="一時停止／再開（⌃Space）">⏸</button><button id="dcFwd2" title="2秒進める（⌥⌘→）">+2秒</button>
+    <span id="dcTCur" class="t">0:00</span><input type="range" id="dcProg" min="0" max="1000" step="1" value="0" aria-label="この文の再生位置"><span id="dcTTot" class="t">0:00</span>
+  </div>
   <div id="dcText" class="dc-text"></div>
   <div id="dcResult" class="dc-result" hidden></div>
   <div class="dc-actions"><button id="dcCheck" class="primary">答え合わせ <kbd>Enter</kbd></button>
