@@ -277,3 +277,16 @@ a.fr.missing{color:inherit;text-decoration:none;cursor:text}
 .dc-player input[type=range]{flex:1;min-width:160px;accent-color:var(--accent)}
 .dc-player .t{font:12px ui-monospace,Menlo,monospace;color:var(--ink2);min-width:3em;text-align:center}
 .dc-chk{font-size:11px;padding:0 6px;margin:0 4px 0 1px;border-radius:99px;vertical-align:2px;color:var(--accent);line-height:1.6}
+/* 一覧のフォルダ分け */
+.list li.fold{display:flex;align-items:center;gap:4px;font-weight:600;color:var(--ink2);font-size:12.5px;padding:6px 6px 4px;margin-top:6px}
+.list li.fold .fn{flex:1}
+.list li.fold .fc{font-weight:400;color:var(--muted)}
+.list li.fold .tw{width:1em;text-align:center}
+.list li.fold .fe{padding:0 6px;line-height:1.4}
+.list li.fold.drop{outline:2px dashed var(--accent);outline-offset:-2px}
+.list li.fold[hidden]{display:none}
+.foldmenu{position:absolute;z-index:50;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px;box-shadow:0 4px 14px rgba(0,0,0,.15)}
+.foldmenu button{background:none;border:0;text-align:left;padding:6px 10px;border-radius:6px;color:var(--ink);font-size:13px;cursor:pointer}
+.foldmenu button:hover{background:var(--hover)}
+.folderline{margin:2px 0 6px}
+.side h2 #folderAdd{margin-left:6px;font-weight:400}

@@ -22,7 +22,7 @@
 
 <div class="layout">
   <aside class="side">
-    <h2>論文</h2>
+    <h2>論文 <button id="folderAdd" class="small" title="フォルダを足す">＋ フォルダ</button></h2>
     <ul id="paperList" class="list"></ul>
     <p id="paperEmpty" class="muted" hidden>まだありません。上の「PDF を取り込む」か「テキストを貼り付け」から入れるか、この画面に PDF をドラッグしてください。</p>
     <h2>単語帳 <span id="vocabCount" class="muted"></span></h2>
@@ -125,6 +125,7 @@
     <section id="paper" hidden>
       <h2 id="paperTitle"></h2>
       <p id="paperMeta" class="muted"></p>
+      <p class="muted folderline"><label>フォルダ <select id="paperFolder"></select></label></p>
       <div id="qualityBox" class="qualitybox" hidden></div>
       <p class="audioline"><button id="figBtn" class="small" hidden>図・表・数式</button>
         <button id="marksBtn" class="small" hidden>★ 印</button>

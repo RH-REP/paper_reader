@@ -25,33 +25,140 @@ const post = (path, body) => api(path, { method: "POST", headers: { "Content-Typ
 // ---- 文を、クリックできる単語と図への参照に分けて入れる（shared.js）----
 function fillWords(el, text) { fillShared(el, text, { terms: S.terms }); }
 
-// ---- 論文の一覧と取り込み ----
+// ---- 論文の一覧（フォルダ分け）と取り込み ----
+const UNSORTED = "未分類";
+
 async function loadPapers(selectId) {
-  S.papers = await api("/api/papers");
+  await refreshList();
+  const id = selectId || pref.get("last", null);
+  if (id && S.papers.some((m) => m.id === id)) openPaper(id);
+}
+
+// 一覧だけを描き直す（開いている論文はそのまま。再生も止めない）
+async function refreshList() {
+  [S.papers, S.folders] = await Promise.all([api("/api/papers"), api("/api/folders")]);
   const ul = $("paperList");
   ul.innerHTML = "";
   $("paperEmpty").hidden = S.papers.length > 0;
-  for (const m of S.papers) {
-    const li = document.createElement("li");
-    li.dataset.id = m.id;
-    li.textContent = m.title;
-    const sm = document.createElement("small");
-    sm.textContent = (m.source === "text" ? "テキスト" : `${m.pages}ページ`) + `・${m.sections}章・${m.sentences}文`
-      + (m.ocr_pages?.length ? `・OCR ${m.ocr_pages.length}ページ` : "") + (m.marks ? `・★${m.marks}` : "");
-    li.appendChild(sm);
-    const pos = m.position;
-    if (pos?.total) {                                // 聞いたところまで（しおり）
-      const bar = document.createElement("span");
-      bar.className = "pbar";
-      bar.title = `しおり: ${pos.section || ""}（${Math.round((pos.done / pos.total) * 100)}%）`;
-      bar.innerHTML = `<i style="width:${Math.min(100, (pos.done / pos.total) * 100).toFixed(1)}%"></i>`;
-      li.appendChild(bar);
+  const closed = new Set(pref.get("foldClosed", []));
+  const groups = [...S.folders.folders.map((f) => [f, f]), ["", UNSORTED]];
+  for (const [key, label] of groups) {
+    const ms = S.papers.filter((m) => (m.folder || "") === key);
+    if (!key && !ms.length) continue;               // 未分類は、入っている論文があるときだけ出す
+    const shut = closed.has(label);
+    const head = document.createElement("li");
+    head.className = "fold";
+    head.innerHTML = `<span class="tw">${shut ? "▸" : "▾"}</span> <span class="fn"></span> <span class="fc"></span>`;
+    head.querySelector(".fn").textContent = label;
+    head.querySelector(".fc").textContent = ms.length;
+    head.onclick = () => {
+      shut ? closed.delete(label) : closed.add(label);
+      pref.set("foldClosed", [...closed]);
+      refreshList();
+    };
+    if (key) {
+      const b = document.createElement("button");
+      b.className = "small fe";
+      b.textContent = "⋯";
+      b.title = "名前を変える・動かす・消す";
+      b.onclick = (e) => { e.stopPropagation(); folderMenu(key, b); };
+      head.appendChild(b);
     }
-    li.onclick = () => openPaper(m.id);
-    ul.appendChild(li);
+    head.ondragover = (e) => { e.preventDefault(); head.classList.add("drop"); };   // 論文をドラッグして入れる
+    head.ondragleave = () => head.classList.remove("drop");
+    head.ondrop = async (e) => {
+      e.preventDefault();
+      head.classList.remove("drop");
+      const pid = e.dataTransfer.getData("text/paper-id");
+      if (pid) await movePaper(pid, key);
+    };
+    ul.appendChild(head);
+    for (const m of ms) {
+      const li = paperItem(m);
+      li.hidden = shut;
+      ul.appendChild(li);
+    }
   }
-  const id = selectId || pref.get("last", null);
-  if (id && S.papers.some((m) => m.id === id)) openPaper(id);
+  if (S.paper) document.querySelectorAll("#paperList li[data-id]").forEach((li) => li.classList.toggle("on", li.dataset.id === S.paper.id));
+}
+
+function paperItem(m) {
+  const li = document.createElement("li");
+  li.dataset.id = m.id;
+  li.textContent = m.title;
+  const sm = document.createElement("small");
+  sm.textContent = (m.source === "text" ? "テキスト" : `${m.pages}ページ`) + `・${m.sections}章・${m.sentences}文`
+    + (m.ocr_pages?.length ? `・OCR ${m.ocr_pages.length}ページ` : "") + (m.marks ? `・★${m.marks}` : "");
+  li.appendChild(sm);
+  const pos = m.position;
+  if (pos?.total) {                                // 聞いたところまで（しおり）
+    const bar = document.createElement("span");
+    bar.className = "pbar";
+    bar.title = `しおり: ${pos.section || ""}（${Math.round((pos.done / pos.total) * 100)}%）`;
+    bar.innerHTML = `<i style="width:${Math.min(100, (pos.done / pos.total) * 100).toFixed(1)}%"></i>`;
+    li.appendChild(bar);
+  }
+  li.draggable = true;
+  li.ondragstart = (e) => e.dataTransfer.setData("text/paper-id", m.id);
+  li.onclick = () => openPaper(m.id);
+  return li;
+}
+
+async function movePaper(pid, folder) {
+  try { await post(`/api/papers/${pid}/folder`, { folder }); }
+  catch (e) { alert(`移せませんでした: ${e.message}`); }
+  await refreshList();
+  if (S.paper?.id === pid) renderFolderSelect();
+}
+
+async function editFolders(body) {
+  try { await post("/api/folders", body); }
+  catch (e) { alert(e.message); }
+  await refreshList();
+  if (S.paper) renderFolderSelect();
+}
+
+function folderMenu(name, anchor) {
+  document.querySelector(".foldmenu")?.remove();
+  const box = document.createElement("div");
+  box.className = "foldmenu";
+  const acts = [
+    ["名前を変える", () => { const to = prompt("フォルダの新しい名前", name); if (to && to.trim() !== name) editFolders({ op: "rename", name, to: to.trim() }); }],
+    ["上へ", () => editFolders({ op: "up", name })],
+    ["下へ", () => editFolders({ op: "down", name })],
+    ["消す（中の論文は未分類へ）", () => { if (confirm(`フォルダ「${name}」を消しますか？ 中の論文は${UNSORTED}に戻ります（論文は消えません）。`)) editFolders({ op: "delete", name }); }],
+  ];
+  for (const [label, fn] of acts) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.onclick = (e) => { e.stopPropagation(); box.remove(); fn(); };
+    box.appendChild(b);
+  }
+  const r = anchor.getBoundingClientRect();
+  box.style.left = `${r.left + window.scrollX}px`;
+  box.style.top = `${r.bottom + window.scrollY + 2}px`;
+  document.body.appendChild(box);
+  setTimeout(() => document.addEventListener("click", () => box.remove(), { once: true }));
+}
+
+$("folderAdd").onclick = () => {
+  const name = prompt("新しいフォルダの名前");
+  if (name && name.trim()) editFolders({ op: "add", name: name.trim() });
+};
+
+// 開いている論文の「フォルダ」の選び
+function renderFolderSelect() {
+  const sel = $("paperFolder");
+  const cur = S.papers.find((m) => m.id === S.paper.id)?.folder || "";
+  sel.innerHTML = "";
+  for (const [v, label] of [...S.folders.folders.map((f) => [f, f]), ["", UNSORTED]]) {
+    const o = document.createElement("option");
+    o.value = v;
+    o.textContent = label;
+    o.selected = v === cur;
+    sel.appendChild(o);
+  }
+  sel.onchange = () => movePaper(S.paper.id, sel.value);
 }
 
 async function importFiles(files) {
@@ -111,7 +218,7 @@ async function openPaper(id) {
   S.paper = p;
   S.audio = p.audio;
   pref.set("last", id);
-  document.querySelectorAll("#paperList li").forEach((li) => li.classList.toggle("on", li.dataset.id === id));
+  document.querySelectorAll("#paperList li[data-id]").forEach((li) => li.classList.toggle("on", li.dataset.id === id));
   $("placeholder").hidden = true;
   $("paper").hidden = false;
   const meta = S.papers.find((m) => m.id === id) || {};
@@ -121,6 +228,7 @@ async function openPaper(id) {
   S.position = p.position || null;
   setTerms(p.glossary);
   renderMeta();
+  renderFolderSelect();
   $("aiBtn").hidden = !p.has_pdf;                  // 貼り付けたテキストには元の PDF が無い
   renderSections();
   renderAudio();

@@ -29,6 +29,9 @@
   GET  /api/pronounce                   読み方の辞書 {"rules": [{"from", "to", "case"}]}
   POST /api/pronounce                   読み方の辞書を保存（変わった文だけ音声が作り直される）
   POST /api/pronounce/preview           {"text"} 直した読みと試聴の音声（/api/preview/<名前>.m4a）
+  GET  /api/folders                     フォルダの並びと、論文ごとの入れ先 {"folders", "papers": {id: 名前}}
+  POST /api/folders                     {"op": "add"|"rename"|"delete"|"up"|"down", "name", "to"} フォルダを足す・名前を変える・消す・動かす
+  POST /api/papers/<id>/folder          {"folder"} 論文をフォルダに入れる（空なら未分類）
   POST /api/position                    しおり {"paper_id", "sentence", "section", "item_id", "offset", "done", "total"}
   POST /api/marks/toggle                {"paper_id", "sentence", "section"} 文の印を付ける／外す
   POST /api/marks/<uid>/note            {"note"} 印のメモ
@@ -72,6 +75,7 @@ import aifix  # noqa: E402
 import audio  # noqa: E402
 import bundle  # noqa: E402
 import figures  # noqa: E402
+import folders  # noqa: E402
 import glossary  # noqa: E402
 import pronounce  # noqa: E402
 import quality  # noqa: E402
@@ -105,6 +109,7 @@ class App:
         self.config_path = config_path
         self.cfg = load_config(config_path)
         self.store = Store(self.cfg["data_root"])
+        self.folders = folders.Folders(self.store.root / "folders.json")
         self.dict = Dictionary(self.cfg["data_root"], online=self.cfg["online_dict"])
         self.localdict = Dictionary(self.cfg["data_root"], online=False)    # 用語集づくり用（ネットを使わない）
         self._gloss = {"sig": None, "index": {}}
@@ -481,8 +486,12 @@ class Handler(SimpleHTTPRequestHandler):
             counts: dict[str, int] = {}
             for mk in app.state.marks():
                 counts[mk["paper_id"]] = counts.get(mk["paper_id"], 0) + 1
+            where = app.folders.get()["papers"]
             return self._json([{**m, "position": pos.get(m["id"]), "marks": counts.get(m["id"], 0),
-                                "audio_ready": app.audio_ready(m["id"])} for m in app.store.list()])
+                                "audio_ready": app.audio_ready(m["id"]), "folder": where.get(m["id"], "")}
+                               for m in app.store.list()])
+        if path == "/api/folders":
+            return self._json(app.folders.get())
         if path == "/api/marks/export":
             pid = q.get("paper") or None
             if pid and not self._paper_dir(pid):
@@ -724,6 +733,20 @@ class Handler(SimpleHTTPRequestHandler):
             except RuntimeError as e:
                 return self._json({"error": str(e)}, HTTPStatus.CONFLICT)
             return self._json({"error": "action は start か stop"}, HTTPStatus.BAD_REQUEST)
+        if path == "/api/folders":
+            b = self._body_json()
+            try:
+                return self._json(app.folders.edit(str(b.get("op", "")), b.get("name"), b.get("to")))
+            except ValueError as e:
+                return self._json({"error": str(e)}, HTTPStatus.BAD_REQUEST)
+        m = re.fullmatch(r"/api/papers/([0-9a-f]{8})/folder", path)
+        if m:
+            if not self._paper_dir(m.group(1)):
+                return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            try:
+                return self._json(app.folders.put(m.group(1), self._body_json().get("folder") or None))
+            except ValueError as e:
+                return self._json({"error": str(e)}, HTTPStatus.BAD_REQUEST)
         if path == "/api/position":
             b = self._body_json()
             if not self._paper_dir(str(b.get("paper_id", ""))):
