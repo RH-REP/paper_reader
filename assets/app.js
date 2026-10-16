@@ -1677,7 +1677,9 @@ async function lookup(word, ctx = {}) {
   if (S.paper) qs.set("paper", S.paper.id);
   if (ctx.sec) qs.set("sec", ctx.sec);
   if (ctx.sentence) qs.set("sentence", ctx.sentence);
+  const seq = (S.lookupSeq = (S.lookupSeq || 0) + 1);   // 続けて押したら前の語の結果は捨てる（遅れて届いて上書きしない）
   const r = await api(`/api/lookup?${qs}`);
+  if (seq !== S.lookupSeq) return;
   showWord(r, ctx);
 }
 

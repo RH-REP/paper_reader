@@ -7,7 +7,7 @@ import { unzipStored, text } from "./zip.js";
 import { chapterTitle, findSentenceId, quizChapter, attachZoom, fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating,
          tokenize, pickBlanks, gradeWord, gradeSentence, levelAdvice } from "./shared.js";
 
-const VERSION = "17";
+const VERSION = "18";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
@@ -36,6 +36,7 @@ function route() {
   document.querySelectorAll(".view").forEach((s) => (s.hidden = s.id !== `v-${S.view}`));
   document.querySelectorAll(".tabs a").forEach((a) => a.classList.toggle("on", a.dataset.v === S.view));
   $("sheet").hidden = true;
+  document.body.classList.remove("sheet-open");
   if (S.view === "review") loadReview();
   if (S.view === "words") loadWords();
   if (S.view === "data") loadStats();
@@ -1123,10 +1124,32 @@ function glossaryLookup(r, word) {
            entries: [{ word: t.term, mean }, ...(r.found ? r.entries : [])], note: "専門用語" };
 }
 
+// 押した語のカードをすぐ出し（引いている間は「引いています…」）、引き終わったら中身を入れる。
+// 続けて別の語を押したら、前の語の結果は捨てる（遅れて届いた前の結果で上書きされ、押した語と違うカードが出ていた）
 async function lookupAndShow(word, ctx = {}) {
+  const seq = (S.lookupSeq = (S.lookupSeq || 0) + 1);
+  $("sheet").hidden = false;
+  $("wcWord").textContent = word;
+  $("wcNote").textContent = "";
+  $("wcMeans").textContent = "引いています…";
+  $("wcRegister").hidden = true;
+  sheetOpened();
   const r = glossaryLookup(await lookup(word), word);
   if (r.found) r.registered = !!(await db.get("words", r.headword));
+  if (seq !== S.lookupSeq) return;
   showWord(r, ctx);
+}
+// カードを開いたら、押した語がカードの下に隠れないよう少し上へ（ディクテーションと読む画面）
+function sheetOpened() {
+  document.body.classList.add("sheet-open");
+  const hit = document.querySelector(".w.hit");
+  if (!hit) return;
+  const sheetTop = $("sheet").getBoundingClientRect().top || innerHeight * 0.45;
+  const r = hit.getBoundingClientRect();
+  if (r.bottom > sheetTop - 8) {
+    const box = hit.closest(".dictpanel") || document.scrollingElement;
+    box.scrollBy({ top: r.bottom - sheetTop + 60, behavior: "smooth" });
+  }
 }
 
 document.addEventListener("click", (e) => {
@@ -1140,7 +1163,10 @@ document.addEventListener("click", (e) => {
   const sec = S.paper?.paper.sections.find((s) => s.id === secEl?.dataset.sec);
   lookupAndShow(w.textContent, { section: sec?.title, sentence: w.closest("[data-t]")?.dataset.t || w.closest(".now")?.textContent });
 });
-$("sheetClose").onclick = () => { $("sheet").hidden = true; };
+$("sheetClose").onclick = () => { $("sheet").hidden = true; document.body.classList.remove("sheet-open"); };
+// ディクテーションで打っている途中に語を押しても、空欄から入力が外れない（外れるとキーボードが閉じて画面が動き、
+// 押した所と違う所に当たったり、押しても何も起きなかったりしていた）
+document.addEventListener("mousedown", (e) => { if (e.target.closest("#dcText .w")) e.preventDefault(); });
 $("searchForm").onsubmit = (e) => { e.preventDefault(); const w = $("searchInput").value.trim(); if (w) lookupAndShow(w); };
 
 async function loadWords() {

@@ -3,11 +3,15 @@
 //   5. Free Dictionary API（英英。ネットがあるときだけ）
 const shards = new Map();
 
+// 読めなかったとき（電波が無い・まだ保存していない）は覚えない。覚えると、その頭文字の語が
+// 次に読み込み直すまでずっと「見つからない」になり、同じ語を押しても結果が変わる原因になっていた
 async function shard(ch) {
   if (!shards.has(ch)) {
-    shards.set(ch, fetch(`dict/${ch}.json`).then((r) => (r.ok ? r.json() : {})).catch(() => ({})));
+    const p = fetch(`dict/${ch}.json`).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
+    shards.set(ch, p);
+    p.catch(() => shards.delete(ch));
   }
-  return shards.get(ch);
+  return shards.get(ch).catch(() => ({}));
 }
 
 async function ej(w) {
