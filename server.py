@@ -32,6 +32,9 @@
   GET  /api/folders                     フォルダの並びと、論文ごとの入れ先 {"folders", "papers": {id: 名前}}
   POST /api/folders                     {"op": "add"|"rename"|"delete"|"up"|"down", "name", "to"} フォルダを足す・名前を変える・消す・動かす
   POST /api/papers/<id>/folder          {"folder"} 論文をフォルダに入れる（空なら未分類）
+  GET  /api/feedback                    改善のコメントの送り先（feedback_repo）
+  POST /api/feedback                    {"screen", "comment", "version", "context", "screenshot"(data URL), "client_log", "include_log"}
+                                        画面の !○ から。GitHub の Issue にする（feedback.py）。記録の末尾を付け、この Mac の場所は伏せる
   POST /api/position                    しおり {"paper_id", "sentence", "section", "item_id", "offset", "done", "total"}
   POST /api/marks/toggle                {"paper_id", "sentence", "section"} 文の印を付ける／外す
   POST /api/marks/<uid>/note            {"note"} 印のメモ
@@ -63,6 +66,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import traceback
 from datetime import datetime
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -72,6 +76,8 @@ from urllib.parse import parse_qs, unquote, urlsplit
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import aifix  # noqa: E402
+import feedback  # noqa: E402
+from applog import AppLog, scrub  # noqa: E402
 import audio  # noqa: E402
 import bundle  # noqa: E402
 import figures  # noqa: E402
@@ -88,7 +94,8 @@ from vocab import Vocab  # noqa: E402
 
 STATIC = {"/": "index.html", "/index.html": "index.html"}
 MAX_UPLOAD = 200 * 1024 * 1024
-DEFAULTS = {"data_root": "data", "voice": audio.DEFAULT_VOICE, "rate": 175, "online_dict": True,
+DEFAULTS = {"feedback_repo": "RH-REP/paper_reader", "feedback_account": "RH-REP",   # 画面の !○ の送り先と、使う gh のアカウント
+            "data_root": "data", "voice": audio.DEFAULT_VOICE, "rate": 175, "online_dict": True,
             "pwa_url": "https://rh-rep.github.io/paper_reader/"}
 
 
@@ -114,6 +121,8 @@ class App:
         self.localdict = Dictionary(self.cfg["data_root"], online=False)    # 用語集づくり用（ネットを使わない）
         self._gloss = {"sig": None, "index": {}}
         self.aifix = aifix.AiFixer()
+        # 記録は log/ 1か所（applog.py）。置き場は config.json の隣（利用側の clone の直下）
+        self.log = AppLog((config_path.parent if config_path else HERE) / "log")
         self.vocab = Vocab(self.cfg["data_root"])
         self.state = State(self.cfg["data_root"])
         audio.PRONOUNCER = self.pron = pronounce.Pronouncer(self.store.root / "pronunciations.json")
@@ -287,7 +296,15 @@ class App:
     def _loop(self, key: str, pid: str, run, current):
         """仕事を走らせ、終わったときに文が変わっていれば（作っている最中に章を編集したなど）今の文でもう一度走らせる。"""
         while True:
-            run(self.store.paper_dir(pid), self.store.load(pid))
+            try:
+                st = run(self.store.paper_dir(pid), self.store.load(pid))
+                if isinstance(st, dict) and st.get("state") == "error":
+                    self.log(f"仕事の失敗 {key}: {str(st.get('error', ''))[:300]}")
+            except Exception:
+                self.log.crash(key, traceback.format_exc())
+                with self.lock:
+                    self.jobs.pop(key, None)
+                return
             with self.lock:
                 d = self.store.paper_dir(pid)
                 if key not in self.redo and current(d, self.store.load(pid)):
@@ -388,6 +405,28 @@ class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(HERE), **kw)
 
+    def send_feedback(self, b: dict) -> dict:
+        """画面の !○ から来た改善のコメントを Issue にする。システムの記録の末尾を付け、この Mac の場所は伏せる。"""
+        import base64
+        app = self.app
+        shot = None
+        m = re.match(r"^data:image/png;base64,(.+)$", str(b.get("screenshot") or ""), re.S)
+        if m:
+            shot = base64.b64decode(m.group(1))
+        root = app.store.root
+        log = ""
+        if b.get("include_log", True):
+            log = "---- server.log（末尾） ----\n" + app.log.tail(80)
+            if b.get("client_log"):
+                log += "\n---- 画面の記録（再生・エラー） ----\n" + str(b["client_log"])[-6000:]
+        ctx = {k: scrub(str(v), root)[:2000] for k, v in (b.get("context") or {}).items() if v}
+        report = {"screen": str(b.get("screen") or "?")[:80], "comment": str(b.get("comment") or "")[:8000],
+                  "app": "paper_reader", "version": str(b.get("version") or "")[:80], "context": ctx,
+                  "screenshot": shot, "log": scrub(log, root)}
+        res = feedback.send(app.cfg["feedback_repo"], app.cfg["feedback_account"], report)
+        app.log(f"改善のコメントを送った: #{res['number']} [{report['screen']}]")
+        return res
+
     def log_message(self, fmt, *args):
         sys.stderr.write("%s %s\n" % (self.log_date_time_string(), fmt % args))
 
@@ -477,7 +516,9 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json({"ok": True, "data_root": str(app.store.root)})
         if path == "/api/config":
             meta = app.dict.path.parent / "meta.json"
-            return self._json({"voice": audio.resolve_voice(app.cfg["voice"]), "rate": app.cfg["rate"],
+            from applog import code_version
+            return self._json({"version": code_version(), "feedback_repo": app.cfg["feedback_repo"],
+                               "voice": audio.resolve_voice(app.cfg["voice"]), "rate": app.cfg["rate"],
                                "pwa_url": app.cfg["pwa_url"],
                                "voices": audio.voices(), "dict": app.dict.available(),
                                "dict_meta": json.loads(meta.read_text(encoding="utf-8")) if meta.exists() else None})
@@ -598,6 +639,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(app.vocab.list())
         if path == "/api/review":
             return self._json(app.fix_refs(app.vocab.queue()))
+        if path == "/api/feedback":
+            return self._json({"repo": app.cfg["feedback_repo"], "account": app.cfg["feedback_account"]})
         if path == "/api/pronounce":
             return self._json({"rules": app.pron.rules()})
         m = re.fullmatch(r"/api/preview/([0-9a-f]{20}\.m4a)", path)
@@ -747,6 +790,17 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json(app.folders.put(m.group(1), self._body_json().get("folder") or None))
             except ValueError as e:
                 return self._json({"error": str(e)}, HTTPStatus.BAD_REQUEST)
+        if path == "/api/feedback":
+            n = int(self.headers.get("Content-Length") or 0)
+            if not 0 < n <= 20 * 1024 * 1024:
+                return self._json({"error": "空か大きすぎる"}, HTTPStatus.BAD_REQUEST)
+            try:
+                b = json.loads(self.rfile.read(n))
+                return self._json(self.send_feedback(b))
+            except feedback.FeedbackError as e:
+                return self._json({"error": str(e)}, HTTPStatus.BAD_GATEWAY)
+            except (ValueError, KeyError, TypeError) as e:
+                return self._json({"error": f"形が正しくない: {e}"}, HTTPStatus.BAD_REQUEST)
         if path == "/api/position":
             b = self._body_json()
             if not self._paper_dir(str(b.get("paper_id", ""))):
@@ -854,9 +908,17 @@ def main():
     ap.add_argument("--config", type=Path, default=None)
     a = ap.parse_args()
     app = App(a.config)
+    app.log.start_info(sys.argv, {"port": a.port, "data_root": "<data>", "voice": app.cfg["voice"], "rate": app.cfg["rate"],
+                                  "feedback_repo": app.cfg["feedback_repo"]})
+    app.log.install_hooks()
     Handler.app = app
     app.resume_pending()
-    srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
+
+    class Server(ThreadingHTTPServer):
+        def handle_error(self, request, client_address):     # API の処理の例外もクラッシュのレポートにする
+            app.log.crash("request", traceback.format_exc())
+
+    srv = Server(("127.0.0.1", a.port), Handler)
     print(f"paper_reader: http://127.0.0.1:{a.port}/  data_root={app.cfg['data_root']}", flush=True)
     try:
         srv.serve_forever()

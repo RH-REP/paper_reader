@@ -15,13 +15,13 @@
 
 <main>
   <!-- 読む -->
-  <section id="v-read" class="view">
+  <section id="v-read" data-screen="pwa.list" class="view">
     <div id="paperPick">
       <h2>論文</h2>
       <ul id="paperList" class="list"></ul>
       <p id="paperEmpty" class="empty" hidden>まだ論文がありません。<br>下の「データ」から、Mac で書き出した zip を読み込んでください。<br><a href="#help">使い方を見る</a></p>
     </div>
-    <div id="paperView" hidden>
+    <div id="paperView" data-screen="pwa.paper" hidden>
       <button id="backToList" class="link">← 論文の一覧</button>
       <h2 id="paperTitle"></h2>
       <p class="row"><button id="playAll" class="primary">▶ 全体を読む</button>
@@ -30,18 +30,18 @@
         <label class="muted"><input type="checkbox" id="quizAtEnd"> 章の終わりにクイズ</label>
         <label class="muted"><input type="checkbox" id="showJa" checked> 訳</label></p>
       <p><button id="figBtn" class="btn" hidden>図・表・数式</button> <button id="marksBtn" class="btn" hidden>★ 印</button> <button id="dcOpen" class="btn">✎ ディクテーション</button> <button id="quizBtn" class="btn" hidden>？ 理解クイズ</button></p>
-      <div id="figPanel" hidden><div id="figGrid" class="figgrid"></div></div>
-      <div id="marksPanel" hidden><p class="muted small">印は Mac に戻すと、Mac で Markdown に書き出せます。押すとその文から再生します。</p><ol id="marksList" class="markslist"></ol></div>
+      <div id="figPanel" data-screen="pwa.figures" data-screen-layer="1" hidden><div id="figGrid" class="figgrid"></div></div>
+      <div id="marksPanel" data-screen="pwa.marks" data-screen-layer="1" hidden><p class="muted small">印は Mac に戻すと、Mac で Markdown に書き出せます。押すとその文から再生します。</p><ol id="marksList" class="markslist"></ol></div>
       <ol id="sections" class="sections"></ol>
     </div>
   </section>
 
   <!-- 復習 -->
-  <section id="v-review" class="view" hidden>
+  <section id="v-review" data-screen="pwa.review" class="view" hidden>
     <p class="center"><span class="modes" id="revModes"><button data-mode="meaning">意味を思い出す</button><button data-mode="cloze">空欄を埋める</button></span></p>
     <p id="revCounts" class="counts"></p>
     <div id="revCard" class="card" hidden>
-      <div id="revCloze" class="cloze" hidden>
+      <div id="revCloze" data-screen="pwa.review.cloze" class="cloze" hidden>
         <div id="czJa" class="cz-ja"></div>
         <div id="czEn" class="cz-en"></div>
         <div class="cz-row"><button id="czCheck" class="primary">確かめる</button> <button id="czHint" class="btn">頭文字</button>
@@ -65,7 +65,7 @@
   </section>
 
   <!-- 単語帳 -->
-  <section id="v-words" class="view" hidden>
+  <section id="v-words" data-screen="pwa.words" class="view" hidden>
     <form id="searchForm" class="search"><input id="searchInput" type="search" placeholder="英単語を引く" autocomplete="off" autocapitalize="off" spellcheck="false"></form>
     <h2>単語帳 <span id="wordCount" class="muted"></span></h2>
     <ul id="wordList" class="list words"></ul>
@@ -73,7 +73,7 @@
   </section>
 
   <!-- データ -->
-  <section id="v-data" class="view" hidden>
+  <section id="v-data" data-screen="pwa.data" class="view" hidden>
     <div class="panel">
       <h3>Mac のデータを読み込む</h3>
       <p class="muted">Mac の paper_reader の「スマホ」で書き出した zip（論文・音声・単語帳・Mac での復習の記録）。</p>
@@ -96,7 +96,7 @@
   </section>
 
   <!-- 使い方 -->
-  <section id="v-help" class="view help" hidden>
+  <section id="v-help" data-screen="pwa.help" class="view help" hidden>
     <h2>Android での使い方</h2>
     <h3>1. app を入れる（最初の1回）</h3>
     <ol>
@@ -143,7 +143,7 @@
 </main>
 
 <!-- 理解クイズ（章ごと。Mac の AI が作った quiz.json）-->
-<div id="quizPanel" class="dictpanel" hidden>
+<div id="quizPanel" data-screen="pwa.quiz" data-screen-layer="5" class="dictpanel" hidden>
   <div class="dc-head"><b>理解クイズ</b> <button id="qzClose" class="btn">閉じる</button></div>
   <div class="dc-opts"><select id="qzChapter"></select></div>
   <div id="qzWhere" class="muted small"></div>
@@ -155,7 +155,7 @@
 </div>
 
 <!-- ディクテーション（文を聞いて、ランダムに空けた語を打つ）-->
-<div id="dictPanel" class="dictpanel" hidden>
+<div id="dictPanel" data-screen="pwa.dictation" data-screen-layer="5" class="dictpanel" hidden>
   <div class="dc-head"><b>ディクテーション</b> <button id="dcClose" class="btn">閉じる</button></div>
   <div class="dc-levels modes" id="dcLevels"></div>
   <div class="dc-opts"><select id="dcScope"></select> <select id="dcOrder"><option value="seq">順に</option><option value="rand">ランダム</option></select></div>
@@ -202,7 +202,7 @@
 </div>
 
 <!-- 図を大きく開く -->
-<div id="lightbox" class="lightbox" hidden>
+<div id="lightbox" data-screen="pwa.figure_view" data-screen-layer="6" class="lightbox" hidden>
   <div class="lb-bar"><b id="lbLabel"></b> <span id="lbCount"></span>
     <button id="lbClose" class="icon close">×</button></div>
   <div id="lbStage" class="lb-stage"><img id="lbImg" alt="" draggable="false"></div>
@@ -214,7 +214,7 @@
 </div>
 
 <!-- 辞書 -->
-<div id="sheet" class="sheet" hidden>
+<div id="sheet" data-screen="pwa.word" data-screen-layer="4" class="sheet" hidden>
   <div class="sheet-head"><b id="wcWord"></b> <span id="wcNote" class="tag"></span>
     <button id="wcSay" class="icon" title="発音">🔈</button><button id="sheetClose" class="icon close">×</button></div>
   <div id="wcMeans" class="means"></div>

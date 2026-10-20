@@ -8,7 +8,8 @@ export PATH="$HOME/.pyenv/shims:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bi
 
 USE_DIR="${0:A:h}"
 CONFIG_FILE="$USE_DIR/config.json"
-LOG_FILE="$USE_DIR/server.log"
+mkdir -p "$USE_DIR/log"
+LOG_FILE="$USE_DIR/log/terminal.log"            # 記録は log/ 1か所（server.log・クラッシュのレポートも log/）
 VENV="$USE_DIR/.venv"
 
 if [[ ! -f "$USE_DIR/server.py" ]]; then

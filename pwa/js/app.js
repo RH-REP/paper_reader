@@ -6,8 +6,9 @@ import * as srs from "./srs.js";
 import { unzipStored, text } from "./zip.js";
 import { chapterTitle, findSentenceId, quizChapter, attachZoom, fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating,
          tokenize, pickBlanks, gradeWord, gradeSentence, levelAdvice } from "./shared.js";
+import { installFeedback, newIssueUrl } from "./feedback.js";
 
-const VERSION = "18";
+const VERSION = "19";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
@@ -658,6 +659,8 @@ document.addEventListener("visibilitychange", () => { if (S.playing && !S.paused
 function setFull(on) {
   if (on === $("player").classList.contains("full")) return;
   $("player").classList.toggle("full", on);
+  if (on) { $("player").dataset.screen = "pwa.player_full"; $("player").dataset.screenLayer = "3"; }   // 引き上げた再生バーは1つの画面
+  else { delete $("player").dataset.screen; delete $("player").dataset.screenLayer; }
   if (on) history.pushState({ full: 1 }, "");
   else if (history.state?.full) history.back();
   showJa(false);
@@ -1505,3 +1508,49 @@ async function init() {
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});   // 容量が足りなくなっても消されにくくする
 }
 init();
+
+// ---- 画面の !○（改善のコメント）----
+// スマホには GitHub の鍵を置かない。書き込み済みの「新しい Issue」画面を開き、スマホのブラウザでログインして送る。
+// 画面の写真はスマホに保存し、GitHub の画面で添付する
+const FEEDBACK_REPO = "RH-REP/paper_reader";
+let fbLogCache = "";
+async function refreshFbLog() {
+  const names = { finished: "最後まで", "audio-error": "音声を読めない", "tts-error": "読み上げが止まった", "play-rejected": "再生を拒まれた",
+                  "system-pause": "Android が止めた", "no-audio": "音声なし→読み上げ", hidden: "画面を消した", visible: "画面に戻った" };
+  const log = ((await kv("play_log")) || []).slice(-30);
+  fbLogCache = log.length ? "---- 再生の記録 ----\n" + log.map((e) => `${e.t} ${names[e.ev] || e.ev}${e.hidden ? "（画面オフ）" : ""} ${e.item} ${e.detail || ""}`).join("\n") : "";
+}
+document.addEventListener("pointerdown", (e) => { if (e.target.closest("#fbBtn")) refreshFbLog(); }, true);
+installFeedback({
+  app: "paper_reader",
+  version: `スマホ版 ${VERSION}`,
+  repo: FEEDBACK_REPO,
+  sendLabel: "写真を保存して GitHub を開く",
+  getContext() {
+    const it = !$("dictPanel").hidden ? DC.items?.[DC.pos] : S.items?.[S.pos];
+    return {
+      paper: S.paper ? `${S.paper.meta?.title || ""}（${S.paper.id}）` : "",
+      sentence: it ? (it.t || it.show || "") : "",
+      device: `スマホ・${/Android/.test(navigator.userAgent) ? "Android" : "ブラウザ"}・${innerWidth}×${innerHeight}・${S.device}`,
+      extra: [S.view && `タブ ${S.view}`, S.playing && `再生中 ${S.pos + 1}/${S.items.length}`, !$("dictPanel").hidden && `ディクテーション Lv${DC.level}`].filter(Boolean).join(" ・ "),
+    };
+  },
+  getLog: () => fbLogCache,
+  send(payload) {
+    // 押した操作の中で（ブラウザが新しい画面を止めないうちに）開く
+    const r = { ...payload, log: payload.client_log,
+                imageNote: payload.screenshot ? "（スマホに保存した写真 paper_reader_screen_*.png を、ここに添付してください）" : "" };
+    const url = newIssueUrl(FEEDBACK_REPO, r);
+    window.open(url, "_blank", "noopener");
+    if (payload.screenshot) {
+      const a = document.createElement("a");
+      const d = new Date(), z = (n) => String(n).padStart(2, "0");
+      a.href = payload.screenshot;
+      a.download = `paper_reader_screen_${d.getMonth() + 1}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+    return Promise.resolve({ message: "GitHub の画面を開きました。写真は「ダウンロード」に保存。添付して「Submit new issue」で送ります" });
+  },
+});

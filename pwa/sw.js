@@ -3,9 +3,9 @@
 //   （保存したものを先に出すと、更新直後に「新しい画面＋古いプログラム」が混ざって動かなくなるため）
 // - 辞書（dict/*.json）: 大きく、めったに変わらないので保存したものを先に出す
 // 版を上げると古い保存は消える。新しい版に切り替わると、画面（js/app.js）が1回だけ読み直す。
-const CACHE = "paper_reader-v18";
+const CACHE = "paper_reader-v19";
 const SHELL = ["./", "index.html", "app.css", "manifest.webmanifest", "js/app.js", "js/db.js", "js/lookup.js",
-               "js/srs.js", "js/zip.js", "js/shared.js", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png"];
+               "js/srs.js", "js/zip.js", "js/shared.js", "js/feedback.js", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: "reload" }))))

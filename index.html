@@ -31,12 +31,12 @@
   </aside>
 
   <main id="main">
-    <section id="reviewView" class="view" hidden>
+    <section id="reviewView" data-screen="review" class="view" hidden>
       <h2>復習 <span class="modes" id="revModes"><button data-mode="meaning">意味を思い出す</button><button data-mode="cloze">空欄を埋める</button></span></h2>
       <p id="revCounts" class="counts"></p>
       <div id="revCard" class="card" hidden>
         <div class="front">
-          <div id="revCloze" class="cloze" hidden>
+          <div id="revCloze" data-screen="review.cloze" class="cloze" hidden>
             <div id="czJa" class="cz-ja"></div>
             <div id="czEn" class="cz-en"></div>
             <div class="cz-row"><button id="czCheck" class="primary">確かめる <kbd>Enter</kbd></button>
@@ -76,7 +76,7 @@
         </ol></details>
     </section>
 
-    <section id="phoneView" class="view" hidden>
+    <section id="phoneView" data-screen="phone" class="view" hidden>
       <h2>スマホ（Android）で使う</h2>
       <div class="grid2">
         <div class="panel">
@@ -120,13 +120,13 @@
       </div>
     </section>
 
-    <div id="readView" class="view">
+    <div id="readView" data-screen="reader.list" class="view">
     <p id="placeholder" class="muted">左の一覧から論文を選んでください。</p>
-    <section id="paper" hidden>
+    <section id="paper" data-screen="reader.paper" hidden>
       <h2 id="paperTitle"></h2>
       <p id="paperMeta" class="muted"></p>
       <p class="muted folderline"><label>フォルダ <select id="paperFolder"></select></label></p>
-      <div id="qualityBox" class="qualitybox" hidden></div>
+      <div id="qualityBox" data-screen="reader.quality" data-screen-layer="1" class="qualitybox" hidden></div>
       <p class="audioline"><button id="figBtn" class="small" hidden>図・表・数式</button>
         <button id="marksBtn" class="small" hidden>★ 印</button>
         <button id="termsBtn" class="small" hidden>用語</button>
@@ -136,16 +136,16 @@
         <button id="editBtn" class="small" aria-pressed="false" title="見出しの段を上げ下げ・章を分ける・つなぐ・名前を変える">章を編集</button>
         <button id="aiBtn" class="small">AI に手直しを頼む（プロンプトをコピー）</button>
         <span id="manualTag" class="muted"></span></p>
-      <div id="figPanel" class="figpanel" hidden>
+      <div id="figPanel" data-screen="reader.figures" data-screen-layer="1" class="figpanel" hidden>
         <p class="muted">押すと大きく開きます。線で描かれた図・表・数式が抜けている、番号が違うときは「AI に手直しを頼む」で直せます。</p>
         <div id="figGrid" class="figgrid"></div>
       </div>
-      <div id="termsPanel" class="markspanel" hidden>
+      <div id="termsPanel" data-screen="reader.terms" data-screen-layer="1" class="markspanel" hidden>
         <p class="muted">この論文によく出る専門用語（辞書に無い語・略語・よく出る句）。訳は Mac 内蔵の翻訳。本文では点線の付いた語で、押すとこの訳が出ます。
           語を押すと辞書のカード、「登録」で単語帳へ（最初に出てきた文が例文になります）。</p>
         <div id="termsBody"></div>
       </div>
-      <div id="marksPanel" class="markspanel" hidden>
+      <div id="marksPanel" data-screen="reader.marks" data-screen-layer="1" class="markspanel" hidden>
         <p class="muted">文の ☆ を押すか、再生中に <kbd>M</kbd> で印が付きます。押すとその文から続けて再生します。メモは書くとすぐ保存されます。</p>
         <ol id="marksList" class="markslist"></ol>
         <p><button id="marksCopy" class="primary">Markdown をコピー</button>
@@ -153,14 +153,14 @@
           <label class="muted"><input type="checkbox" id="marksAll"> 全部の論文</label>
           <span id="marksMsg" class="muted"></span></p>
       </div>
-      <div id="aiPanel" class="aipanel" hidden>
+      <div id="aiPanel" data-screen="reader.ai_prompt" data-screen-layer="1" class="aipanel" hidden>
         <p class="muted">章分け・単語の区切り・文の切れ目・OCR などがうまくいかなかったとき、下の文を Claude Code などファイルを読み書きできる AI に貼ると、
           元の PDF を見ながら <code>sentences.json</code> を直します（直す前は <code>sentences.orig.json</code> に残ります）。
           直ったらこの論文を開き直すと、音声と訳が作り直されます。</p>
         <textarea id="aiText" readonly rows="10"></textarea>
         <p><button id="aiCopy" class="primary">コピー</button> <button id="aiClose" class="small">閉じる</button> <span id="aiMsg" class="muted"></span></p>
       </div>
-      <div id="editHelp" class="edithelp" hidden>
+      <div id="editHelp" data-screen="reader.edit_sections" data-screen-layer="1" class="edithelp" hidden>
         <b>章の編集</b>: 見出しの <kbd>&lt;</kbd> <kbd>&gt;</kbd> でその章と下の節を1段上げる／下げる（3段まで）。
         「名前」で見出しを変える、「前とつなぐ」で見出しを文に戻して前の章に入れる。文の「ここで分ける」でその文から新しい章にする。
         変えた文の分だけ音声と訳が作り直されます（同じ文は作り直しません）。<span id="editMsg" class="err"></span>
@@ -211,7 +211,7 @@
   </main>
 </div>
 
-<div id="quizPanel" class="dictpanel" hidden>
+<div id="quizPanel" data-screen="reader.quiz" data-screen-layer="5" class="dictpanel" hidden>
   <div class="dc-head"><b>理解クイズ</b> <label>章 <select id="qzChapter"></select></label>
     <span id="qzStat" class="muted"></span> <button id="qzClose" class="small">閉じる <kbd>Esc</kbd></button></div>
   <div id="qzWhere" class="dc-where muted"></div>
@@ -222,7 +222,7 @@
     <button id="qzResume" class="primary" hidden>▶ 続きを聞く</button> <button id="qzAgain" class="small" hidden>この章をもう一度</button></div>
 </div>
 
-<div id="dictPanel" class="dictpanel" hidden>
+<div id="dictPanel" data-screen="reader.dictation" data-screen-layer="5" class="dictpanel" hidden>
   <div class="dc-head">
     <b>ディクテーション</b>
     <span class="modes" id="dcLevels"></span>
@@ -246,7 +246,7 @@
     <button id="dcNext" class="primary" hidden>次へ <kbd>Enter</kbd></button> <button id="dcPrev" class="small" title="前の文（Alt+←）">◀ 前の文</button> <button id="dcSkip" class="small" title="次の文（Alt+→）">次の文 ▶</button></div>
 </div>
 
-<dialog id="pronDlg" class="pastedlg">
+<dialog id="pronDlg" data-screen="settings.pronounce" data-screen-layer="7" class="pastedlg">
   <h3>読み方の辞書</h3>
   <p class="muted">音声を作るときだけ置き換えます（画面の文・訳・辞書は変わりません）。語全体に合うときだけ置き換え、「大小」に印があれば大文字小文字も区別します。
     変えた語を含む文だけ、音声が作り直されます。<br>
@@ -258,7 +258,7 @@
   <p><button id="pronSave" class="primary">保存</button> <button id="pronClose">閉じる</button> <span id="pronMsg" class="muted"></span></p>
 </dialog>
 
-<dialog id="pasteDlg" class="pastedlg">
+<dialog id="pasteDlg" data-screen="import.paste" data-screen-layer="7" class="pastedlg">
   <form id="pasteForm" method="dialog">
     <h3>テキストを貼り付けて音声にする（英語）</h3>
     <label>題名（空なら1行目から付けます）<input id="pasteTitle" type="text" autocomplete="off" spellcheck="false"></label>
@@ -269,7 +269,7 @@
   </form>
 </dialog>
 
-<aside id="wordCard" class="wordcard" hidden>
+<aside id="wordCard" data-screen="word.card" data-screen-layer="4" class="wordcard" hidden>
   <button id="wordClose" class="close" title="閉じる">×</button>
   <div class="wc-head"><b id="wcWord"></b> <span id="wcNote" class="tag"></span>
     <button id="wcSay" class="small" title="発音">🔈</button></div>
@@ -279,7 +279,7 @@
   <div class="wc-foot muted"><span id="wcSource"></span> <a id="wcWeblio" target="_blank" rel="noopener">Weblio で見る ↗</a></div>
 </aside>
 
-<div id="lightbox" class="lightbox" hidden>
+<div id="lightbox" data-screen="reader.figure_view" data-screen-layer="6" class="lightbox" hidden>
   <div class="lb-bar"><b id="lbLabel"></b> <span id="lbCount" class="muted"></span>
     <a id="lbOpen" target="_blank" rel="noopener" class="btn small">画像を新しいタブで開く ↗</a>
     <button id="lbClose" class="small">閉じる（Esc）</button></div>

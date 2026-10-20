@@ -2,5 +2,7 @@
   "data_root": "data",
   "voice": "Ava (Premium)",
   "rate": 175,
-  "online_dict": true
+  "online_dict": true,
+  "feedback_repo": "RH-REP/paper_reader",
+  "feedback_account": "RH-REP"
 }

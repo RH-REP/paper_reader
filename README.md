@@ -140,6 +140,21 @@ cp config.example.json config.json
   スマホで復習した記録は、スマホの「記録を書き出す」→ 受け渡しページで送るか、ここで「記録ファイルを読み込む」。二重にはならない。
 - OCR: 文字層の無いページは Tesseract（`/opt/homebrew/share/tessdata` の `eng`）で読む。どのページを OCR したかは画面の上に出る。
 
+### 改善のコメント（画面の !○）
+
+どの画面にも右上に「!」がある。押すと、その画面の ID（例 `reader.dictation`、`pwa.player_full`）と、書いたコメントを GitHub の Issue（ラベル `feedback`）にする。付けるかどうかは画面で選べる。
+
+- 開いている論文・記事の題名と今の文、端末とそのときの状態
+- 画面の写真（app が自分で撮る。撮れないときは貼り付け）
+- システムの記録の末尾（Mac は `log/server.log` の末尾と画面側の記録。この Mac の場所・ユーザー名は伏せる）
+
+| | 送り方 |
+|---|---|
+| Mac 版 | 「GitHub に送る」でそのまま Issue になる。この Mac の `gh` にログインしている `feedback_account` の token を使う。写真は repo の枝 `feedback-assets`（コードの入らない枝）に上げて Issue に載せる |
+| スマホ版 | 「写真を保存して GitHub を開く」で、中身を書き込んだ新しい Issue の画面が開き、写真は端末に保存される。GitHub にログインして写真を添付し「Submit new issue」で送る |
+
+repo が公開のあいだは、送った中身（写真・論文の文・記録）も公開になる。
+
 ### 置いてあるもの
 
 | 名前 | 中身 |
@@ -164,8 +179,12 @@ cp config.example.json config.json
 | `data/words/` | 単語の発音の m4a（作り直せる） |
 | `data/dict/ejdict.sqlite` `meta.json` | 辞書（`tools/build_dict.py --config config.json` で作り直せる。出典と commit は meta.json） |
 | `backup/` | 手で取った `vocab.sqlite` などの退避 |
-| `config.json` | `data_root`（既定 `data`）、`voice`、`rate`、`online_dict`（英英 API を使うか） |
-| `server.log` | サーバーのログ |
+| `config.json` | `data_root`（既定 `data`）、`voice`、`rate`、`online_dict`（英英 API を使うか）、`feedback_repo` `feedback_account`（改善のコメントの送り先） |
+| `log/server.log`（`.1`〜`.3`） | サーバーの出来事（起動ごとの版・設定の要点、API や音声・訳の仕事の失敗）。2 MB で回す |
+| `log/terminal.log` | 端末への出力（`start.command` が向ける。起動の失敗もここ） |
+| `log/faulthandler.log` | Python ごと落ちたときの場所（空なら何も起きていない） |
+| `log/crash/<日時>_<部分>/report.md` | 例外で止まったときのレポート（新しい 20 件だけ残す） |
+| `log/README.txt` | `log/` の中身の説明（起動のたびに書き直す） |
 | `.bin/mac_translate` | 訳を作る小さなプログラム（初回に作られる） |
 | `.venv/` | Python の依存（`start.command` が初回に作る。clone では来ない） |
 | `start.command` | 起動口。この clone のコードを、このフォルダの `config.json` と `data/` で動かす |
@@ -208,11 +227,11 @@ cp config.example.json config.json
 
 ```text
 開発側（この repo、公開 repo RH-REP/paper_reader、AGPL-3.0）
-  server.py extract.py store.py audio.py translate.py lookup.py vocab.py srs.py bundle.py share.py
+  server.py extract.py store.py audio.py translate.py lookup.py vocab.py srs.py bundle.py share.py applog.py feedback.py
   ai_fix_prompt.md  index.html  assets/  pwa/  tools/  samples/  tests/  .github/workflows/pages.yml
   start.command update.command
 利用側（この repo の clone。利用データは .gitignore で除外し、外に出さない）
-  <clone で届くもの>  config.json  .venv/  .bin/  backup/  server.log
+  <clone で届くもの>  config.json  .venv/  .bin/  backup/  log/
   data/  ← 正本（papers/<sha8>/、vocab.sqlite、dict/、words/<声>/、share/）。中身は上の「置いてあるもの」
 スマホ（PWA の IndexedDB）             papers / audio / words / reviews / lookups / kv
 ```

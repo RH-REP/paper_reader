@@ -3,6 +3,7 @@
 // 音声がまだできていない間だけ、ブラウザの読み上げ（Web Speech API）で代わりに読む。
 import { chapterTitle, findSentenceId, quizChapter, attachZoom, fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating,
          tokenize, pickBlanks, gradeWord, gradeSentence, levelAdvice } from "./shared.js";
+import { installFeedback } from "./feedback.js";
 
 const $ = (id) => document.getElementById(id);
 const S = { papers: [], paper: null, audio: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
@@ -2216,3 +2217,27 @@ loadVocab().catch(() => {});
 refreshDue().catch(() => {});
 loadPapers().catch((e) => status("サーバーにつながりません: " + e.message));
 showView(pref.get("view", "read"));
+
+// ---- 画面の !○（改善のコメントを GitHub の Issue に）----
+installFeedback({
+  app: "paper_reader",
+  get version() { return `Mac ${S.cfg?.version || "?"}`; },
+  get repo() { return S.cfg?.feedback_repo || "RH-REP/paper_reader"; },
+  getContext() {
+    const it = !$("dictPanel").hidden ? DC.items?.[DC.pos] : S.items?.[S.pos];
+    const ua = navigator.userAgent;
+    return {
+      paper: S.paper ? `${S.paper.title || ""}（${S.paper.id}）` : "",
+      sentence: it ? (it.t || it.show || "") : "",
+      device: `Mac・${/Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "ブラウザ"}・${innerWidth}×${innerHeight}`,
+      extra: [S.view && `タブ ${S.view}`, S.playing && `再生中 ${S.pos + 1}/${S.items.length}`, !$("dictPanel").hidden && `ディクテーション Lv${DC.level}`,
+              S.audio?.state && `音声 ${S.audio.state}`].filter(Boolean).join(" ・ "),
+    };
+  },
+  getLog() {
+    const names = { finished: "最後まで", "audio-error": "音声を読めない", "tts-error": "読み上げが止まった", "play-rejected": "再生を拒まれた", "system-pause": "OS が止めた" };
+    const log = pref.get("playLog", []).slice(-30);
+    return log.length ? "---- 再生の記録 ----\n" + log.map((e) => `${e.t} ${names[e.ev] || e.ev} ${e.item} ${e.detail}`).join("\n") : "";
+  },
+  send: (payload) => post("/api/feedback", payload),
+});
