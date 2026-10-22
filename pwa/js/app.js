@@ -8,7 +8,7 @@ import { chapterTitle, findSentenceId, quizChapter, attachZoom, fillWords as fil
          tokenize, pickBlanks, gradeWord, gradeSentence, levelAdvice } from "./shared.js";
 import { installFeedback, newIssueUrl } from "./feedback.js";
 
-const VERSION = "20";
+const VERSION = "21";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };

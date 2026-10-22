@@ -154,7 +154,7 @@ cp config.example.json config.json
 | Mac 版 | 「GitHub に送る」でそのまま Issue になる。この Mac の `gh` にログインしている `feedback_account` の token を使う。写真は repo の枝 `feedback-assets`（コードの入らない枝）に上げて Issue に載せる |
 | スマホ版 | 「写真を保存して GitHub を開く」で、中身を書き込んだ新しい Issue の画面が開き、写真は端末に保存される。GitHub にログインして写真を添付し「Submit new issue」で送る |
 
-repo が公開のあいだは、送った中身（写真・論文の文・記録）も公開になる。
+repo が公開のあいだは、送った中身（写真・論文の文・記録）も公開になる。そのため画面の写真は既定で付けない（チェックを入れたときだけ付く）。
 
 ### 置いてあるもの
 

@@ -178,7 +178,7 @@ export async function openFeedback(opts) {
       <textarea class="fb-text" rows="5" placeholder="どこを、どう直したいか（例: 再生ボタンが小さい、ここで止まった）"></textarea>
       <label class="fb-row"><input type="checkbox" class="fb-ctx" checked> <span>開いている論文・今の文を付ける</span></label>
       <div class="fb-muted fb-ctxv"></div>
-      <label class="fb-row"><input type="checkbox" class="fb-shot" checked> <span>画面の写真を付ける</span></label>
+      <label class="fb-row"><input type="checkbox" class="fb-shot"> <span>画面の写真を付ける（公開 repo なので既定は付けない）</span></label>
       <div class="fb-shotbox"><img class="fb-img" alt="画面の写真"><div class="fb-muted fb-noshot" hidden>このブラウザでは写真を撮れませんでした。⌘⇧4 などで撮って、ここに貼り付けられます（⌘V）。</div></div>
       <label class="fb-row"><input type="checkbox" class="fb-log" checked> <span>システムの記録の末尾を付ける（この Mac の場所は伏せる）</span></label>
       <details class="fb-logv"><summary class="fb-muted">付ける記録を見る</summary><pre></pre></details>
