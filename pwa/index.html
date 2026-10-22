@@ -198,6 +198,14 @@
   <div class="prow"><button id="stop" class="btn stopbtn" title="停止">■ 停止</button>
     <label class="speed"><input type="range" id="speed" min="0.7" max="2" step="0.05" value="1"><span id="speedVal">1.00×</span></label>
   </div>
+  <!-- 引き上げた画面の下: 聞いている文に空欄の枠を被せて打つ（文の幅は変えない） -->
+  <div id="pdBar" class="pdbar">
+    <button id="pdToggle" class="btn" aria-pressed="false">✎ ディクテーション</button>
+    <span id="pdLv" class="pdlv"></span>
+    <button id="pdCheck" class="btn primary" hidden>答え合わせ</button>
+    <button id="pdAgain" class="btn" hidden>もう一度</button>
+  </div>
+  <div id="pdRes" class="pdres small" hidden></div>
   <p id="status" class="muted small"></p>
 </div>
 

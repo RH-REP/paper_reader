@@ -226,3 +226,18 @@ body.sheet-open #paperView{padding-bottom:50vh}
 .fb-img{max-width:100%;max-height:260px;border:1px solid var(--line);border-radius:6px}
 .fb-logv pre{max-height:160px;overflow:auto;font-size:11px;background:var(--bg);padding:6px;border-radius:6px;white-space:pre-wrap}
 .fb-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+/* 引き上げた再生画面のディクテーション: 語の上に枠を被せる（文の幅・折り返しは変えない） */
+.pdbar{display:none}
+.player.full .pdbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0 2px}
+.pdbar .btn{min-height:44px;padding:8px 11px}
+#pdCheck,#pdAgain{flex:1 1 40%}
+#pdToggle[aria-pressed="true"]{background:var(--word);border-color:var(--accent);color:var(--accent)}
+.pdlv{display:flex;gap:4px}.pdlv button{padding:6px 8px;font-size:14px;min-height:40px}.pdlv button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.pdres{display:none}.player.full .pdres:not([hidden]){display:flex;gap:6px;flex-wrap:wrap;align-items:center;color:var(--ink2);margin:2px 0}
+#nowText{position:relative}
+.now .w.pd-hid{color:transparent;pointer-events:none}
+.pd-box{position:absolute;box-sizing:border-box;margin:0;padding:0 3px;font:inherit;font-size:.92em;line-height:1.2;border:none;border-bottom:2px solid var(--accent);
+  border-radius:4px;background:var(--word);color:var(--ink);outline:none;z-index:1}
+.pd-box:focus{box-shadow:0 0 0 2px var(--accent)}
+.now .w.pd-ok{background:rgba(46,139,87,.16);border-radius:3px}.now .w.pd-near{background:rgba(209,154,0,.22);border-radius:3px}
+.now .w.pd-ng{background:rgba(192,57,43,.16);color:#b03a2e;border-radius:3px}

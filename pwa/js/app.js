@@ -8,7 +8,7 @@ import { chapterTitle, findSentenceId, quizChapter, attachZoom, fillWords as fil
          tokenize, pickBlanks, gradeWord, gradeSentence, levelAdvice } from "./shared.js";
 import { installFeedback, newIssueUrl } from "./feedback.js";
 
-const VERSION = "19";
+const VERSION = "20";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
@@ -394,6 +394,15 @@ function halt() {
 
 function advance(g) {
   if (g !== S.gen || S.paused) return;
+  if (pdShouldHold()) {                                       // 引き上げた画面のディクテーション: 文の終わりで止めて打ってもらう
+    S.paused = true;
+    PD.hold = true;
+    showProgress();
+    setMedia();
+    $("status").textContent = "空欄を埋めて「答え合わせ」（▶ で次の文、「もう一度」でこの文）";
+    PD.boxes.find((x) => x.isConnected && !x.value)?.focus();
+    return;
+  }
   // 「章の終わりにクイズ」: 章が変わる所で止まり、その章の理解クイズを出す
   const cur = S.items[S.pos], nxt = S.items[S.pos + 1];
   if ($("quizAtEnd").checked && cur && S.items.length > 1) {
@@ -530,6 +539,7 @@ function speakTTS(it, g) {
 // Android が「再生していない」とみなしてページを止め、次の文が鳴らないことがある）
 async function speakCurrent(opts = {}) {
   const g = ++S.gen;
+  PD.hold = false;
   if (opts.keep) { if ("speechSynthesis" in window) speechSynthesis.cancel(); }
   else { S.ourPause = true; halt(); S.ourPause = false; }
   if (S.pos >= S.items.length) { savePosition(true, true); S.playing = false; $("status").textContent = "読み終わりました"; setMedia(); renderResume(); playLog("finished"); return; }
@@ -575,6 +585,7 @@ async function speakCurrent(opts = {}) {
 
 function pauseResume() {
   if (!S.playing) return;
+  if (PD.hold) { PD.hold = false; S.paused = false; S.pos++; speakCurrent({ keep: true }); return; }   // 打ち終えたら次の文へ
   if (S.paused) { S.paused = false; if (S.player.src && !S.player.error) S.player.play().catch(() => speakCurrent()); else speakCurrent(); }
   else { S.paused = true; savePosition(true); if (S.player.src) S.player.pause(); else { S.gen++; speechSynthesis.cancel(); } }
   showProgress();
@@ -619,6 +630,7 @@ function showProgress() {
   $("nowText").dataset.t = it.heading ? "" : it.show;
   fillWords($("nowText"), it.show);
   markRefs($("nowText"));
+  pdApply();
   $("nowMark").hidden = !!it.heading;
   $("nowDict").hidden = !!it.heading;
   $("nowMark").classList.toggle("on", !it.heading && isMarked(it.show));
@@ -659,11 +671,16 @@ document.addEventListener("visibilitychange", () => { if (S.playing && !S.paused
 function setFull(on) {
   if (on === $("player").classList.contains("full")) return;
   $("player").classList.toggle("full", on);
-  if (on) { $("player").dataset.screen = "pwa.player_full"; $("player").dataset.screenLayer = "3"; }   // 引き上げた再生バーは1つの画面
-  else { delete $("player").dataset.screen; delete $("player").dataset.screenLayer; }
+  pdScreenId();
   if (on) history.pushState({ full: 1 }, "");
   else if (history.state?.full) history.back();
   showJa(false);
+  pdApply();
+}
+function pdScreenId() {                              // 引き上げた再生バーは1つの画面（ディクテーション中は別の ID）
+  const pl = $("player");
+  if (pl.classList.contains("full")) { pl.dataset.screen = PD.on ? "pwa.player_full.dictation" : "pwa.player_full"; pl.dataset.screenLayer = "3"; }
+  else { delete pl.dataset.screen; delete pl.dataset.screenLayer; }
 }
 function showJa(on) {
   const it = S.items[S.pos];
@@ -675,7 +692,7 @@ function showJa(on) {
   if (!ja) { $("jaBtn").hidden = false; $("jaBtn").disabled = true; $("jaBtn").textContent = it?.heading ? "（見出し）" : "（訳なし）"; }
   else $("jaBtn").disabled = false;
 }
-addEventListener("popstate", () => { if ($("player").classList.contains("full")) $("player").classList.remove("full"); });
+addEventListener("popstate", () => { if ($("player").classList.contains("full")) { $("player").classList.remove("full"); pdScreenId(); pdApply(); } });
 $("grab").onclick = () => setFull(!$("player").classList.contains("full"));
 $("jaBtn").onclick = () => showJa(true);
 $("nowJa").onclick = () => showJa(false);
@@ -708,6 +725,137 @@ $("speed").oninput = () => {
   S.player.playbackRate = parseFloat($("speed").value);
   kv("speed", $("speed").value);
 };
+
+// ---- 引き上げた再生画面のディクテーション ----
+// 聞いている文の語の上に、同じ大きさの入力の枠を被せる（語は透明にして場所だけ残す。文の幅・折り返しは変わらない）。
+// 文を読み終えたら止まり、打って「答え合わせ」→ ▶ で次の文。空欄はランダム（shared.js の pickBlanks、Lv1〜4）
+const PD = { on: false, level: 2, hold: false, item: null, blanks: [], values: new Map(), results: new Map(), boxes: [] };
+function pdActive() { return PD.on && $("player").classList.contains("full") && S.playing && !S.items[S.pos]?.heading; }
+function pdShouldHold() { return pdActive() && !document.hidden && PD.blanks.length > 0 && PD.item === S.items[S.pos]?.id && PD.results.size < PD.blanks.length; }
+function pdApply() {
+  PD.boxes.forEach((x) => x.remove());
+  PD.boxes = [];
+  const box = $("nowText"), it = S.items[S.pos];
+  box.querySelectorAll(".w").forEach((w) => w.classList.remove("pd-hid", "pd-ok", "pd-near", "pd-ng"));
+  $("pdCheck").hidden = $("pdAgain").hidden = !pdActive();
+  if (!pdActive()) { $("pdRes").hidden = true; return; }
+  const spans = [...box.querySelectorAll(".w")];
+  if (PD.item !== it.id) {                           // 文が変わったら空欄を選び直す（同じ文の描き直しでは、打った字も結果も残す）
+    PD.item = it.id;
+    PD.blanks = [...pickBlanks(spans.map((w) => ({ t: w.textContent, word: true })), PD.level)].sort((a, b) => a - b);
+    PD.values = new Map();
+    PD.results = new Map();
+    $("pdRes").hidden = true;
+  }
+  for (const i of PD.blanks) {
+    const w = spans[i];
+    if (!w) continue;
+    const r = PD.results.get(i);
+    if (r) { w.classList.add(`pd-${r}`); continue; }
+    w.classList.add("pd-hid");
+    const inp = document.createElement("input");
+    inp.className = "pd-box";
+    inp.spellcheck = false;
+    inp.autocomplete = "off";
+    inp.setAttribute("autocapitalize", "off");
+    inp.setAttribute("autocorrect", "off");
+    inp.setAttribute("aria-label", "聞こえた語");
+    inp.value = PD.values.get(i) || "";
+    inp.dataset.i = i;
+    inp.w = w;
+    inp.oninput = () => PD.values.set(i, inp.value);
+    inp.onkeydown = (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const rest = PD.boxes.filter((x) => x.isConnected);
+      const k = rest.indexOf(inp);
+      if (k < rest.length - 1) rest[k + 1].focus(); else pdCheck();
+    };
+    box.appendChild(inp);
+    PD.boxes.push(inp);
+  }
+  PD.boxes.forEach((x, k) => x.setAttribute("enterkeyhint", k < PD.boxes.length - 1 ? "next" : "done"));
+  $("pdCheck").hidden = !PD.boxes.length;            // 全部答え合わせしたら（空欄の無い文も）出さない
+  pdPlace();
+}
+function pdPlace() {                                 // 枠を語の位置・大きさに合わせる（キーボードの開閉・回転でも描き直さず動かすだけ）
+  for (const inp of PD.boxes) {
+    const w = inp.w;
+    Object.assign(inp.style, { left: `${w.offsetLeft - 2}px`, top: `${w.offsetTop}px`, width: `${w.offsetWidth + 4}px`, height: `${w.offsetHeight}px` });
+  }
+}
+function pdCheck() {
+  const it = S.items[S.pos];
+  if (!pdActive() || PD.item !== it.id) return;
+  const spans = [...$("nowText").querySelectorAll(".w")];
+  for (const i of PD.blanks) if (!PD.results.has(i)) PD.results.set(i, gradeWord(PD.values.get(i), spans[i]?.textContent || ""));
+  pdApply();
+  const miss = PD.blanks.filter((i) => PD.results.get(i) !== "ok");
+  const ok = PD.blanks.length - miss.length;
+  const res = $("pdRes");
+  res.textContent = "";
+  const head = document.createElement("b");
+  head.textContent = `${ok} / ${PD.blanks.length} 正解`;
+  res.appendChild(head);
+  for (const i of miss) {
+    const sp = document.createElement("span");
+    const typed = (PD.values.get(i) || "").trim();
+    sp.textContent = `${spans[i].textContent}${typed ? `（あなた: ${typed}）` : ""}`;
+    res.appendChild(sp);
+  }
+  if (miss.length) {                                 // 外した語を単語帳へ（例文はこの文）
+    const b = document.createElement("button");
+    b.className = "btn";
+    const words = [...new Set(miss.map((i) => spans[i].textContent))];
+    b.textContent = `外した語を単語帳に（${words.length}語）`;
+    b.onclick = async () => {
+      b.disabled = true;
+      let n = 0, ng = 0;
+      for (const w of words) {
+        const r = glossaryLookup(await lookup(w), w);
+        if (!r.found) { ng++; continue; }
+        await recordLookup(r, { section: it.sec.title, sentence: it.show });
+        n++;
+      }
+      b.textContent = `${n}語を登録${ng ? `（辞書に無い ${ng}語）` : ""}`;
+    };
+    res.appendChild(b);
+  }
+  res.hidden = false;
+  if (S.paused && PD.hold) $("status").textContent = "▶ で次の文、「もう一度」でこの文";
+}
+async function pdSetup() {
+  PD.on = !!(await kv("pd_on"));
+  PD.level = (await kv("pd_level")) || 2;
+  const lv = $("pdLv");
+  for (let n = 1; n <= 4; n++) {
+    const b = document.createElement("button");
+    b.textContent = `Lv${n}`;
+    b.title = ["", "1語", "2割", "4割", "内容語すべて"][n];
+    b.onclick = () => { PD.level = n; kv("pd_level", n); PD.item = null; pdBarState(); pdApply(); };
+    lv.appendChild(b);
+  }
+  pdBarState();
+}
+function pdBarState() {
+  $("pdToggle").setAttribute("aria-pressed", String(PD.on));
+  $("pdLv").hidden = !PD.on;
+  $("pdLv").querySelectorAll("button").forEach((b, i) => b.classList.toggle("on", i + 1 === PD.level));
+  pdScreenId();
+}
+$("pdToggle").onclick = () => {
+  PD.on = !PD.on;
+  kv("pd_on", PD.on);
+  PD.item = null;
+  pdBarState();
+  pdApply();
+  if (!PD.on && PD.hold) pauseResume();             // 止めて待っていたなら、そのまま次の文へ
+};
+$("pdCheck").onclick = pdCheck;
+$("pdAgain").onclick = () => { if (!S.playing) return; S.paused = false; speakCurrent(); };
+$("pdCheck").addEventListener("mousedown", (e) => e.preventDefault());   // 打っている枠から入力を外さずに押せる
+addEventListener("resize", () => PD.boxes.length && pdPlace());
+pdSetup();
 
 // ---- ディクテーション（Mac の画面と同じ決まり。空欄はランダム、判定は shared.js）----
 const DC = { level: 2, order: "seq", audio: new Audio(), url: null };
