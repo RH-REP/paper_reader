@@ -2211,7 +2211,7 @@ addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("
 addEventListener("dragover", (e) => e.preventDefault());
 addEventListener("drop", (e) => { e.preventDefault(); dragDepth = 0; $("drop").hidden = true; importFiles(e.dataTransfer.files); });
 
-const cfgReady = loadConfig().catch(() => {});
+loadConfig().catch(() => {});
 loadVocab().catch(() => {});
 refreshDue().catch(() => {});
 loadPapers().catch((e) => status("サーバーにつながりません: " + e.message));
@@ -2219,10 +2219,11 @@ showView(pref.get("view", "read"));
 
 // ---- 画面の !○（改善のコメントを GitHub の Issue に）----
 // 部品は issue_hub の feedback.js をそのまま写したもの（window.AppFeedback）。install は設定を写し取るので、版と送り先が届いてから呼ぶ
-cfgReady.then(() => AppFeedback.install({
+// （/api/config は声の一覧を作るのに数十秒かかることがあるので待たない。/api/feedback はすぐ返る）
+api("/api/feedback").catch(() => ({})).then((fb) => AppFeedback.install({
   app: "paper_reader",
-  version: `Mac ${S.cfg?.version || "?"}`,
-  repo: S.cfg?.feedback_repo || "RH-REP/paper_reader",
+  version: `Mac ${fb.version || "?"}`,
+  repo: fb.repo || "RH-REP/paper_reader",
   screenshot: "off",                               // 公開 repo のため、写真は選んだときだけ付ける
   isPublic: true,
   getContext() {

@@ -32,7 +32,7 @@
   GET  /api/folders                     フォルダの並びと、論文ごとの入れ先 {"folders", "papers": {id: 名前}}
   POST /api/folders                     {"op": "add"|"rename"|"delete"|"up"|"down", "name", "to"} フォルダを足す・名前を変える・消す・動かす
   POST /api/papers/<id>/folder          {"folder"} 論文をフォルダに入れる（空なら未分類）
-  GET  /api/feedback                    改善のコメントの送り先（feedback_repo）
+  GET  /api/feedback                    改善のコメントの送り先（feedback_repo）と、画面の !○ に書く版（すぐ返る。/api/config は声の一覧で遅い）
   POST /api/feedback                    {"screen", "comment", "version", "context", "screenshot"(data URL), "client_log", "include_log"}
                                         画面の !○ から。GitHub の Issue にする（feedback.py）。記録の末尾を付け、この Mac の場所は伏せる
   POST /api/position                    しおり {"paper_id", "sentence", "section", "item_id", "offset", "done", "total"}
@@ -640,7 +640,8 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/review":
             return self._json(app.fix_refs(app.vocab.queue()))
         if path == "/api/feedback":
-            return self._json({"repo": app.cfg["feedback_repo"], "account": app.cfg["feedback_account"]})
+            from applog import code_version
+            return self._json({"repo": app.cfg["feedback_repo"], "account": app.cfg["feedback_account"], "version": code_version()})
         if path == "/api/pronounce":
             return self._json({"rules": app.pron.rules()})
         m = re.fullmatch(r"/api/preview/([0-9a-f]{20}\.m4a)", path)

@@ -131,6 +131,9 @@ class ServerFeedbackTest(unittest.TestCase):
             req = urllib.request.Request(f"http://127.0.0.1:{srv.server_address[1]}/api/feedback", json.dumps(body).encode(),
                                          {"Content-Type": "application/json"})
             res = json.loads(urllib.request.urlopen(req).read())
+            info = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{srv.server_address[1]}/api/feedback").read())
+            self.assertEqual((info["repo"], info["account"]), ("o/r", "acct"))
+            self.assertIn("version", info)                                  # 画面の !○ は版をここから取る（/api/config は遅い）
             srv.shutdown()
             srv.server_close()
             self.assertEqual(res["number"], 3)
