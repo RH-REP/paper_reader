@@ -3,7 +3,6 @@
 // 音声がまだできていない間だけ、ブラウザの読み上げ（Web Speech API）で代わりに読む。
 import { chapterTitle, findSentenceId, quizChapter, attachZoom, fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating,
          tokenize, pickBlanks, gradeWord, gradeSentence, levelAdvice } from "./shared.js";
-import { installFeedback } from "./feedback.js";
 
 const $ = (id) => document.getElementById(id);
 const S = { papers: [], paper: null, audio: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
@@ -2212,17 +2211,20 @@ addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("
 addEventListener("dragover", (e) => e.preventDefault());
 addEventListener("drop", (e) => { e.preventDefault(); dragDepth = 0; $("drop").hidden = true; importFiles(e.dataTransfer.files); });
 
-loadConfig().catch(() => {});
+const cfgReady = loadConfig().catch(() => {});
 loadVocab().catch(() => {});
 refreshDue().catch(() => {});
 loadPapers().catch((e) => status("サーバーにつながりません: " + e.message));
 showView(pref.get("view", "read"));
 
 // ---- 画面の !○（改善のコメントを GitHub の Issue に）----
-installFeedback({
+// 部品は issue_hub の feedback.js をそのまま写したもの（window.AppFeedback）。install は設定を写し取るので、版と送り先が届いてから呼ぶ
+cfgReady.then(() => AppFeedback.install({
   app: "paper_reader",
-  get version() { return `Mac ${S.cfg?.version || "?"}`; },
-  get repo() { return S.cfg?.feedback_repo || "RH-REP/paper_reader"; },
+  version: `Mac ${S.cfg?.version || "?"}`,
+  repo: S.cfg?.feedback_repo || "RH-REP/paper_reader",
+  screenshot: "off",                               // 公開 repo のため、写真は選んだときだけ付ける
+  isPublic: true,
   getContext() {
     const it = !$("dictPanel").hidden ? DC.items?.[DC.pos] : S.items?.[S.pos];
     const ua = navigator.userAgent;
@@ -2239,5 +2241,5 @@ installFeedback({
     const log = pref.get("playLog", []).slice(-30);
     return log.length ? "---- 再生の記録 ----\n" + log.map((e) => `${e.t} ${names[e.ev] || e.ev} ${e.item} ${e.detail}`).join("\n") : "";
   },
-  send: (payload) => post("/api/feedback", payload),
-});
+  send: (payload) => post("/api/feedback", payload),   // Mac はサーバーが gh の token で Issue にする
+}));

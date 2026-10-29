@@ -400,6 +400,8 @@ def split_sentences(text: str) -> list[str]:
 UNIT_END = re.compile(r"(?<=\d)\s?(K|V|Hz|nm|mm|cm|μm|µm|kHz|MHz|s|h|W|mW|%)\.\s+(?=[A-Z][a-z])")
 CITE_THEN = re.compile(r"(?<=[.!?])\s*(\[\d+(?:\s*[,–-]\s*\d+)*\])\s+(?=[A-Z][a-z])")
 LEAD_CITE = re.compile(r"^(\[\d+(?:\s*[,–-]\s*\d+)*\])\s+(?=[A-Z])")
+# arXiv の1ページ目の左の余白に縦に入る印（大きな字なので題名と取り違える）
+ARXIV_STAMP = re.compile(r"^arXiv:\d{4}\.\d{4,5}(?:v\d+)?\s+\[[^\]]+\]\s+\d{1,2}\s+[A-Z][a-z]{2}\s+\d{4}$")
 
 
 def _resplit(sents: list[str]) -> list[str]:
@@ -424,6 +426,7 @@ def build_paper(doc, on_page=None) -> dict:
         return {"title": "", "pages": len(doc), "ocr_pages": ocr_pages, "sections": []}
     margins = _repeated_margins(lines, doc)
     lines = [ln for ln in lines if re.sub(r"\d+", "#", ln.text) not in margins]
+    lines = [ln for ln in lines if not ARXIV_STAMP.match(ln.text.strip())]
 
     font_lines = [ln for ln in lines if not ln.ocr]
     sizes = Counter()

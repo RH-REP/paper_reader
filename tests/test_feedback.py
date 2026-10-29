@@ -151,7 +151,8 @@ class FeedbackJsTest(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("node"), "node が無い")
     def test_issue_url_and_body(self):
-        js = f'import * as F from "{(HERE / "assets" / "feedback.js").as_posix()}";\n' + r"""
+        js = f'import {{ readFileSync }} from "fs"; globalThis.window = globalThis;\n' \
+             f'new Function(readFileSync("{(HERE / "assets" / "feedback.js").as_posix()}", "utf8"))(); const F = window.AppFeedback;\n' + r"""
 const r = { screen: "pwa.dictation", comment: "ボタンが小さい", app: "paper_reader", version: "スマホ版 19",
             context: { paper: "P", sentence: "S".repeat(800), device: "スマホ" }, log: "あ".repeat(5000), imageNote: "添付して" };
 const url = F.newIssueUrl("o/r", r);

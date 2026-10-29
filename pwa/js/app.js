@@ -6,9 +6,8 @@ import * as srs from "./srs.js";
 import { unzipStored, text } from "./zip.js";
 import { chapterTitle, findSentenceId, quizChapter, attachZoom, fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating,
          tokenize, pickBlanks, gradeWord, gradeSentence, levelAdvice } from "./shared.js";
-import { installFeedback, newIssueUrl } from "./feedback.js";
 
-const VERSION = "21";
+const VERSION = "22";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
@@ -1669,11 +1668,12 @@ async function refreshFbLog() {
   fbLogCache = log.length ? "---- 再生の記録 ----\n" + log.map((e) => `${e.t} ${names[e.ev] || e.ev}${e.hidden ? "（画面オフ）" : ""} ${e.item} ${e.detail || ""}`).join("\n") : "";
 }
 document.addEventListener("pointerdown", (e) => { if (e.target.closest("#fbBtn")) refreshFbLog(); }, true);
-installFeedback({
+AppFeedback.install({   // 部品は issue_hub の feedback.js をそのまま写したもの。送り方は既定（GitHub の画面を開き、写真は端末に保存）
   app: "paper_reader",
   version: `スマホ版 ${VERSION}`,
   repo: FEEDBACK_REPO,
-  sendLabel: "写真を保存して GitHub を開く",
+  screenshot: "off",                               // 公開 repo のため、写真は選んだときだけ付ける
+  isPublic: true,
   getContext() {
     const it = !$("dictPanel").hidden ? DC.items?.[DC.pos] : S.items?.[S.pos];
     return {
@@ -1684,21 +1684,4 @@ installFeedback({
     };
   },
   getLog: () => fbLogCache,
-  send(payload) {
-    // 押した操作の中で（ブラウザが新しい画面を止めないうちに）開く
-    const r = { ...payload, log: payload.client_log,
-                imageNote: payload.screenshot ? "（スマホに保存した写真 paper_reader_screen_*.png を、ここに添付してください）" : "" };
-    const url = newIssueUrl(FEEDBACK_REPO, r);
-    window.open(url, "_blank", "noopener");
-    if (payload.screenshot) {
-      const a = document.createElement("a");
-      const d = new Date(), z = (n) => String(n).padStart(2, "0");
-      a.href = payload.screenshot;
-      a.download = `paper_reader_screen_${d.getMonth() + 1}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}.png`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    }
-    return Promise.resolve({ message: "GitHub の画面を開きました。写真は「ダウンロード」に保存。添付して「Submit new issue」で送ります" });
-  },
 });

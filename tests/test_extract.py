@@ -119,6 +119,20 @@ def make_ao_style(path):
 
 
 class OtherJournalStyleTest(unittest.TestCase):
+    def test_arxiv_margin_stamp_is_not_the_title(self):
+        import pymupdf
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            path = make_ao_style(tmp / "ao.pdf")
+            doc = pymupdf.open(path)
+            doc[0].insert_text((30, 590), "arXiv:2408.14865v1  [astro-ph.IM]  27 Aug 2024", fontname="tiro", fontsize=20, rotate=90)
+            doc.save(tmp / "arxiv.pdf")
+            p = extract.extract_file(tmp / "arxiv.pdf")
+            self.assertEqual(p["title"], "A Fictional Mirror Study")
+            self.assertNotIn("arXiv:", " ".join(x["t"] for s in p["sections"] for x in s["sentences"]))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_small_bold_split_headings_small_abstract_missing_spaces(self):
         tmp = Path(tempfile.mkdtemp())
         try:
