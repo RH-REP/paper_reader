@@ -5,9 +5,9 @@ import { lookup } from "./lookup.js";
 import * as srs from "./srs.js";
 import { unzipStored, text } from "./zip.js";
 import { chapterTitle, findSentenceId, quizChapter, attachZoom, fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating,
-         tokenize, pickBlanks, gradeWord, gradeSentence, levelAdvice } from "./shared.js";
+         tokenize, pickBlanks, gradeWord, gradeSentence, levelAdvice, PAPER_SORTS, sortPapers, sortLabel } from "./shared.js";
 
-const VERSION = "22";
+const VERSION = "23";
 const $ = (id) => document.getElementById(id);
 const S = { view: "read", papers: [], paper: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
             player: new Audio(), wordAudio: new Audio(), url: null, review: null, device: null };
@@ -46,7 +46,10 @@ addEventListener("hashchange", route);
 
 // ---- 論文 ----
 async function loadPapers() {
-  S.papers = (await db.all("papers")).sort((a, b) => (a.meta.imported_at < b.meta.imported_at ? 1 : -1));
+  const sortKey = (await kv("paper_sort")) || "imported", sortDesc = (await kv("paper_sort_desc")) ?? true;
+  const all = await db.all("papers"), byMeta = new Map(all.map((p) => [p.meta, p]));
+  S.papers = sortPapers(all.map((p) => p.meta), sortKey, sortDesc).map((m) => byMeta.get(m));   // 並べ替え（Mac と同じ決まり）
+  paintSort(sortKey, sortDesc);
   S.glossIndex = new Map();                          // 全部の論文の用語集 {語の鍵: {論文id: 項目}}（Mac の App.glossary_index と同じ）
   for (const p of S.papers) for (const t of p.glossary || []) {
     if (t.kind === "phrase" || !t.ja) continue;
@@ -67,6 +70,8 @@ async function loadPapers() {
     const nm = marks.filter((m) => m.paper_id === p.id).length;
     sm.textContent = (p.meta.source === "text" ? "テキスト" : `${p.meta.pages}ページ`) + `・${p.meta.sections}章・${p.meta.sentences}文`
       + (nm ? `・★${nm}` : "");
+    const sl = sortLabel(p.meta, sortKey);
+    if (sl) sm.textContent += `・${sl}`;
     li.appendChild(sm);
     const pos = positions.find((x) => x.paper_id === p.id);
     if (pos?.total) {
@@ -79,6 +84,15 @@ async function loadPapers() {
     ul.appendChild(li);
   }
 }
+
+function paintSort(k, desc) {
+  const sel = $("paperSort");
+  if (!sel.options.length) for (const [key, label] of PAPER_SORTS) sel.add(new Option(label, key));
+  sel.value = k;
+  $("sortDir").textContent = k === "title" ? (desc ? "Z→A" : "A→Z") : k === "pages" ? (desc ? "多い順" : "少ない順") : (desc ? "新しい順" : "古い順");
+}
+$("paperSort").onchange = async () => { const k = $("paperSort").value; await kv("paper_sort", k); await kv("paper_sort_desc", k !== "title"); loadPapers(); };
+$("sortDir").onclick = async () => { await kv("paper_sort_desc", !((await kv("paper_sort_desc")) ?? true)); loadPapers(); };
 
 async function openPaper(id) {
   const p = await db.get("papers", id);

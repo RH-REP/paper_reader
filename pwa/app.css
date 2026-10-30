@@ -241,3 +241,5 @@ body.sheet-open #paperView{padding-bottom:50vh}
 .pd-box:focus{box-shadow:0 0 0 2px var(--accent)}
 .now .w.pd-ok{background:rgba(46,139,87,.16);border-radius:3px}.now .w.pd-near{background:rgba(209,154,0,.22);border-radius:3px}
 .now .w.pd-ng{background:rgba(192,57,43,.16);color:#b03a2e;border-radius:3px}
+.sortbar{display:flex;gap:8px;align-items:center;margin:0 0 10px}.sortbar select{flex:1;min-width:0;font:inherit;font-size:15px;padding:9px 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+.sortbar .btn{white-space:nowrap}

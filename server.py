@@ -890,7 +890,12 @@ class Handler(SimpleHTTPRequestHandler):
                 prog.update(page=n, pages=total, ocr=prog["ocr"] + (1 if ocr else 0))
 
             try:
-                meta = app.store.import_pdf(tmp, name, on_page)
+                mtime = None                                 # 画面が送る元のファイルの日付（ミリ秒）。ダウンロードした日として使う
+                try:
+                    mtime = int(self.headers.get("X-File-Mtime") or 0) / 1000 or None
+                except ValueError:
+                    pass
+                meta = app.store.import_pdf(tmp, name, on_page, file_mtime=mtime)
             except Exception as e:  # 壊れた PDF など
                 return self._json({"error": f"取り込めなかった: {e}"}, HTTPStatus.UNPROCESSABLE_ENTITY)
             finally:

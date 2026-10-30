@@ -2,7 +2,7 @@
 // 読み上げは、サーバーが say で作った1文ずつの m4a を順に鳴らす（どのブラウザでも同じ声）。
 // 音声がまだできていない間だけ、ブラウザの読み上げ（Web Speech API）で代わりに読む。
 import { chapterTitle, findSentenceId, quizChapter, attachZoom, fillWords as fillShared, labelKey, refKeys, resumeIndex, pickExample, checkCloze, suggestRating,
-         tokenize, pickBlanks, gradeWord, gradeSentence, levelAdvice } from "./shared.js";
+         tokenize, pickBlanks, gradeWord, gradeSentence, levelAdvice, PAPER_SORTS, sortPapers, sortLabel } from "./shared.js";
 
 const $ = (id) => document.getElementById(id);
 const S = { papers: [], paper: null, audio: null, items: [], pos: 0, playing: false, paused: false, gen: 0,
@@ -43,7 +43,7 @@ async function refreshList() {
   const closed = new Set(pref.get("foldClosed", []));
   const groups = [...S.folders.folders.map((f) => [f, f]), ["", UNSORTED]];
   for (const [key, label] of groups) {
-    const ms = S.papers.filter((m) => (m.folder || "") === key);
+    const ms = sortPapers(S.papers.filter((m) => (m.folder || "") === key), pref.get("sort", "imported"), pref.get("sortDesc", true));
     if (!key && !ms.length) continue;               // 未分類は、入っている論文があるときだけ出す
     const shut = closed.has(label);
     const head = document.createElement("li");
@@ -89,6 +89,8 @@ function paperItem(m) {
   const sm = document.createElement("small");
   sm.textContent = (m.source === "text" ? "テキスト" : `${m.pages}ページ`) + `・${m.sections}章・${m.sentences}文`
     + (m.ocr_pages?.length ? `・OCR ${m.ocr_pages.length}ページ` : "") + (m.marks ? `・★${m.marks}` : "");
+  const sl = sortLabel(m, pref.get("sort", "imported"));
+  if (sl) sm.textContent += `・${sl}`;
   li.appendChild(sm);
   const pos = m.position;
   if (pos?.total) {                                // 聞いたところまで（しおり）
@@ -103,6 +105,22 @@ function paperItem(m) {
   li.onclick = () => openPaper(m.id);
   return li;
 }
+
+// 並べ替え（フォルダの中で。選んだものは覚える）
+function sortBar() {
+  const sel = $("paperSort");
+  sel.innerHTML = "";
+  for (const [k, label] of PAPER_SORTS) sel.add(new Option(label, k));
+  const paint = () => {
+    const k = pref.get("sort", "imported"), desc = pref.get("sortDesc", true);
+    sel.value = k;
+    $("sortDir").textContent = k === "title" ? (desc ? "Z→A" : "A→Z") : k === "pages" ? (desc ? "多い順" : "少ない順") : (desc ? "新しい順" : "古い順");
+  };
+  sel.onchange = () => { pref.set("sort", sel.value); pref.set("sortDesc", sel.value !== "title"); paint(); refreshList(); };
+  $("sortDir").onclick = () => { pref.set("sortDesc", !pref.get("sortDesc", true)); paint(); refreshList(); };
+  paint();
+}
+sortBar();
 
 async function movePaper(pid, folder) {
   try { await post(`/api/papers/${pid}/folder`, { folder }); }
@@ -189,6 +207,7 @@ function uploadWithProgress(file, head) {
     x.open("POST", "/api/import");
     x.setRequestHeader("Content-Type", "application/pdf");
     x.setRequestHeader("X-Filename", encodeURIComponent(file.name));
+    if (file.lastModified) x.setRequestHeader("X-File-Mtime", String(file.lastModified));   // ダウンロードした日（並べ替え用）
     x.upload.onprogress = (e) => { if (e.lengthComputable) show({ done: Math.round((e.loaded / e.total) * 100), total: 100 }, `送っています ${file.name}`, { pct: true }); };
     x.upload.onload = () => {
       show({ done: 0, total: 0 }, "文字を取り出しています…");

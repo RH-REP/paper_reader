@@ -1,7 +1,8 @@
 """data/ の読み書き。論文1本 = data/papers/<sha8>/ の1フォルダ。
 
   data/papers/<sha8>/original.pdf    取り込んだ PDF のコピー（正本）
-  data/papers/<sha8>/meta.json       題名・元のファイル名・取り込み日時・sha256・OCR したページ
+  data/papers/<sha8>/meta.json       題名・元のファイル名・取り込み日時・sha256・OCR したページ、
+                                     pdf_created（PDF の中の作成日）・downloaded_at（元の PDF ファイルの日付。分かるときだけ）
   data/papers/<sha8>/sentences.json  章と文（original.pdf から作り直せるキャッシュ）
                                      AI などが手直ししたら最上位に "manual" が付き、自動の取り出し直しで上書きしない
   data/papers/<sha8>/sentences.orig.json   手直し前の自動取り出し（手直しする側が残す）
@@ -83,6 +84,29 @@ def normalize(paper: dict) -> tuple[dict, list[str]]:
     return paper, errs
 
 
+
+PDF_DATE = re.compile(r"^D:(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?")
+
+
+def pdf_created(path: Path) -> str | None:
+    """PDF の中の作成日（無ければ更新日）を ISO の文字で。読めなければ None。"""
+    try:
+        import pymupdf
+        with pymupdf.open(path) as doc:
+            md = doc.metadata or {}
+    except Exception:  # 壊れた PDF など
+        return None
+    for key in ("creationDate", "modDate"):
+        m = PDF_DATE.match((md.get(key) or "").strip())
+        if not m:
+            continue
+        y, mo, dd, hh, mi, ss = (int(x) if x else d for x, d in zip(m.groups(), (0, 1, 1, 0, 0, 0)))
+        try:
+            return datetime(y, mo, dd, hh, mi, ss).isoformat(timespec="seconds")
+        except ValueError:
+            continue
+    return None
+
 class Store:
     def __init__(self, data_root: Path):
         self.root = Path(data_root)
@@ -98,9 +122,13 @@ class Store:
             raise KeyError(pid)
         return d
 
-    def import_pdf(self, src: Path, source_name: str | None = None, on_page=None) -> dict:
-        """PDF をコピーして取り込む。同じ中身が既にあれば、それをそのまま返す。"""
+    def import_pdf(self, src: Path, source_name: str | None = None, on_page=None, file_mtime: float | str | None = "src") -> dict:
+        """PDF をコピーして取り込む。同じ中身が既にあれば、それをそのまま返す。
+        file_mtime: 元の PDF ファイルの日付（UNIX 秒）。ダウンロードした日として並べ替えに使う。
+                    "src"（既定）なら src の日付、None なら分からないとして書かない（一時ファイルで受け取ったとき）"""
         src = Path(src)
+        if file_mtime == "src":
+            file_mtime = src.stat().st_mtime
         sha = _sha256(src)
         pid = sha[:8]
         d = self.papers / pid
@@ -110,6 +138,8 @@ class Store:
         shutil.copy2(src, d / "original.pdf")
         meta = {"id": pid, "sha256": sha, "source_name": source_name or src.name,
                 "imported_at": datetime.now().isoformat(timespec="seconds")}
+        if file_mtime:
+            meta["downloaded_at"] = datetime.fromtimestamp(file_mtime).isoformat(timespec="seconds")
         return self._extract(d, meta, on_page)
 
     def import_text(self, title: str, text: str) -> dict:
@@ -165,6 +195,10 @@ class Store:
             "extracted_at": datetime.now().isoformat(timespec="seconds"),
             "extractor_version": self._version(meta),
         })
+        if (d / "original.pdf").exists() and not meta.get("pdf_created"):
+            created = pdf_created(d / "original.pdf")
+            if created:
+                meta["pdf_created"] = created
         _write_json(d / "meta.json", meta)
         return meta
 

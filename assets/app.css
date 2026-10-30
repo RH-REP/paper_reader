@@ -295,3 +295,5 @@ a.fr.missing{color:inherit;text-decoration:none;cursor:text}
 .dc-add:disabled{color:var(--muted);border-color:transparent;background:none}
 .dc-bulk{margin-top:6px}
 #dcText .w{cursor:pointer;border-radius:3px}#dcText .w:hover{background:var(--word)}
+.sortbar{display:flex;gap:6px;align-items:center;margin:-2px 0 8px}.sortbar select{font:inherit;font-size:12.5px;padding:3px 6px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink);flex:1;min-width:0}
+.sortbar .small{white-space:nowrap}

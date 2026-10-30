@@ -345,3 +345,30 @@ export function findSentenceId(sections, t) {
 export function quizChapter(quiz, title) {
   return (quiz?.chapters || []).find((c) => c.chapter === title && (c.questions || []).length) || null;
 }
+
+// ---- 論文の一覧の並べ替え（Mac とスマホで同じ）----
+// key: imported（取り込んだ日）/ created（PDF の中の作成日）/ downloaded（元のファイルの日付）/ title / pages
+// desc: 新しい順・多い順・Z→A。日付やページが分からない論文は、向きにかかわらず最後に回す
+export const PAPER_SORTS = [
+  ["imported", "取り込んだ日"], ["created", "作成日"], ["downloaded", "ダウンロード日"], ["title", "題名"], ["pages", "ページ数"],
+];
+const SORT_FIELD = { imported: "imported_at", created: "pdf_created", downloaded: "downloaded_at", title: "title", pages: "pages" };
+export function sortPapers(metas, key = "imported", desc = true) {
+  const f = SORT_FIELD[key] || "imported_at";
+  const val = (m) => (f === "title" ? String(m.title || "").toLowerCase() : m[f]);
+  const known = metas.filter((m) => val(m) != null && val(m) !== "");
+  const unknown = metas.filter((m) => val(m) == null || val(m) === "");
+  known.sort((a, b) => {
+    const x = val(a), y = val(b);
+    const c = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y));
+    return desc ? -c : c;
+  });
+  return [...known, ...unknown];
+}
+// 一覧の小さい字に添える、並べ替えの値（日付は年月日だけ）
+export function sortLabel(m, key) {
+  const f = SORT_FIELD[key];
+  if (!f || key === "title" || key === "pages") return "";
+  const name = { imported: "取り込み", created: "作成", downloaded: "ダウンロード" }[key];
+  return `${name} ${m[f] ? String(m[f]).slice(0, 10) : "不明"}`;
+}

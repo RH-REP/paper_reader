@@ -23,6 +23,8 @@
 <div class="layout">
   <aside class="side">
     <h2>論文 <button id="folderAdd" class="small" title="フォルダを足す">＋ フォルダ</button></h2>
+    <div class="sortbar"><select id="paperSort" aria-label="並べ替え" title="並べ替え（フォルダの中で）"></select>
+      <button id="sortDir" class="small" title="向きを変える"></button></div>
     <ul id="paperList" class="list"></ul>
     <p id="paperEmpty" class="muted" hidden>まだありません。上の「PDF を取り込む」か「テキストを貼り付け」から入れるか、この画面に PDF をドラッグしてください。</p>
     <h2>単語帳 <span id="vocabCount" class="muted"></span></h2>
