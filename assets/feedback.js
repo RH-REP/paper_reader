@@ -16,6 +16,11 @@
 //   </script>
 // 送り方（既定）: 書き込み済みの「新しい Issue」画面を GitHub で開く。写真は端末に保存し、本人が GitHub で添付して送る
 //   （鍵を app に置かない）。サーバーで送る app は send: async (payload) => ({ number, url }) を渡す。
+// 送り先は 2 つ（2026-11-09）: 「GitHub の Issue」と「対話のセッション（issue_hub）」。対話は、手元で動く issue_hub の画面
+//   （hub: 既定 http://127.0.0.1:8934）にコメントを渡し、issue_hub がその app の対話のセッションに届けて返事を待つ。
+//   対話の欄は、手元で開いた画面（127.0.0.1・localhost・file://）にだけ出す（公開のサイトでは出さない）。talk: false で消す。
+//   repo が無い app（GitHub で管理していない）は、見た目はそのままで「GitHub の Issue」を押せなくする。
+//   onlyLocal: true なら、手元で開いたときだけ「!」を出す（GitHub Pages などで公開しているサイトの訪問者には見せない）。
 // 画面 ID: 要素に data-screen="main.list" を付ける。見えているもののうち data-screen-layer の大きいもの（同じなら DOM の深いもの）を
 //   今の画面とする。どこにも無ければ、ページの名前（index・pairs など）を画面 ID にする。
 (function () {
@@ -184,6 +189,8 @@
 .fb-meta{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .fb-text{width:100%;box-sizing:border-box;font:14px/1.5 -apple-system,sans-serif;padding:8px;border:1px solid #ccc;border-radius:8px;background:#fafafa;color:#222}
 .fb-row{display:flex;gap:6px;align-items:flex-start}.fb-row input{flex:none;margin:3px 0 0}
+.fb-dest{flex-wrap:wrap;gap:4px 12px;align-items:center}.fb-dest label{display:inline-flex;gap:4px;align-items:center}
+.fb-dest input:disabled+*,.fb-dest label:has(input:disabled){opacity:.45}
 .fb-ctxv{margin:-4px 0 2px 22px}
 .fb-img{max-width:100%;max-height:240px;border:1px solid #ccc;border-radius:6px}
 .fb-logv pre{max-height:160px;overflow:auto;font-size:11px;background:#f4f4f4;padding:6px;border-radius:6px;white-space:pre-wrap}
@@ -198,6 +205,27 @@
   .fb-actions button{background:#2a2a2a;color:#eee;border-color:#555}
 }`;
 
+  // ---- 対話のセッションに送る（issue_hub の画面へ）----
+  function localPage() {
+    return location.protocol === "file:" || ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
+  }
+  function sendTalk(opts) {
+    return async function (payload) {
+      const hub = (opts.hub || "http://127.0.0.1:8934").replace(/\/$/, "");
+      let r;
+      try {
+        r = await fetch(hub + "/api/talk-inbox", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ app: opts.app, screen: payload.screen, comment: payload.comment, version: payload.version,
+                                 at: payload.at, context: payload.context, log: payload.client_log, image: payload.screenshot }) });
+      } catch (e) {
+        throw new Error(`issue_hub の画面（${hub}）に届かない。issue_hub.app を開いてから送ってください`);
+      }
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `issue_hub が受け付けなかった（${r.status}）`);
+      return { message: d.message || "対話のセッションに送りました。返事は issue_hub の画面で見られます" };
+    };
+  }
+
   function deviceText() {
     const ua = navigator.userAgent;
     const kind = /Android/.test(ua) ? "Android" : /iPhone|iPad/.test(ua) ? "iOS" : /Mac/.test(ua) ? "Mac" : "ブラウザ";
@@ -205,9 +233,11 @@
   }
 
   function install(opts) {
-    opts = Object.assign({ screenshot: "off", log: true, version: "", sendLabel: null }, opts);
-    if (!opts.repo) throw new Error("AppFeedback.install: repo が要る");
-    if (!opts.send) { opts.send = openGitHub(opts); opts.sendLabel = opts.sendLabel || "GitHub を開く"; }
+    opts = Object.assign({ screenshot: "off", log: true, version: "", sendLabel: null, talk: true, hub: "http://127.0.0.1:8934", onlyLocal: false }, opts);
+    if (opts.onlyLocal && !localPage()) return;
+    if (!opts.repo && !opts.send && !(opts.talk && localPage())) throw new Error("AppFeedback.install: repo か、手元の画面での対話（talk）が要る");
+    if (!opts.send && opts.repo) { opts.send = openGitHub(opts); opts.sendLabel = opts.sendLabel || "GitHub を開く"; }
+    opts.sendTalk = opts.talk && localPage() ? sendTalk(opts) : null;
     addEventListener("error", (e) => rememberError(`${e.message} @ ${(e.filename || "").split("/").pop()}:${e.lineno}`));
     addEventListener("unhandledrejection", (e) => rememberError(`未処理の失敗: ${(e.reason && e.reason.message) || e.reason}`));
     const go = () => {
@@ -263,7 +293,10 @@
     dlg.className = "fb-dlg";
     dlg.innerHTML = `
       <div class="fb-box" role="dialog" aria-label="改善のコメント">
-        <div class="fb-head"><b>改善のコメント</b> <span class="fb-muted">GitHub の新しい Issue（<span class="fb-repo"></span>）にします</span></div>
+        <div class="fb-head"><b>改善のコメント</b> <span class="fb-muted fb-where"></span></div>
+        <div class="fb-row fb-dest"><span class="fb-muted">送り先:</span>
+          <label><input type="radio" name="fbDest" value="github" class="fb-d-gh"> GitHub の Issue</label>
+          <label class="fb-d-talkrow"><input type="radio" name="fbDest" value="talk" class="fb-d-talk"> 対話のセッション（issue_hub）</label></div>
         <div class="fb-warn fb-public" hidden>この repo は公開です。送った中身（コメント・写真・記録）は誰でも読めます。</div>
         <div class="fb-meta"><div>画面: <code class="fb-screen"></code></div><div class="fb-muted fb-ver"></div></div>
         <textarea class="fb-text" rows="5" placeholder="どこを、どう直したいか（例: ボタンが小さい、ここで止まった）"></textarea>
@@ -277,11 +310,32 @@
       </div>`;
     (document.querySelector("dialog[open]") || document.body).appendChild(dlg);
     const $q = (s) => dlg.querySelector(s);
-    $q(".fb-repo").textContent = opts.repo;
-    $q(".fb-public").hidden = !opts.isPublic;
+    // 送り先: GitHub の Issue か、対話のセッション（issue_hub）。repo が無ければ GitHub は押せない（見た目は変えない）
+    const ghOk = !!opts.send, talkOk = !!opts.sendTalk;
+    const ghR = $q(".fb-d-gh"), talkR = $q(".fb-d-talk");
+    ghR.disabled = !ghOk;
+    if (!ghOk) ghR.parentElement.title = "この app は GitHub で管理していない";
+    if (!talkOk) $q(".fb-d-talkrow").hidden = true;
+    let dest = (() => { try { return localStorage.getItem("feedback.dest"); } catch (e) { return null; } })();
+    if (dest === "talk" && !talkOk) dest = null;
+    if (dest === "github" && !ghOk) dest = null;
+    dest = dest || (ghOk ? "github" : "talk");
+    const paintDest = () => {
+      ghR.checked = dest === "github"; talkR.checked = dest === "talk";
+      $q(".fb-where").textContent = dest === "github" ? `GitHub の新しい Issue（${opts.repo || ""}）にします`
+        : `${opts.app} の対話のセッションに送り、issue_hub で返事を待ちます`;
+      $q(".fb-public").hidden = !(dest === "github" && opts.isPublic);
+      $q(".fb-send").textContent = dest === "github" ? (opts.sendLabel || "GitHub に送る") : "対話に送る";
+    };
+    for (const r of [ghR, talkR]) r.onchange = () => {
+      dest = r.value;
+      try { localStorage.setItem("feedback.dest", dest); } catch (e) { /* 覚えられなくても続ける */ }
+      paintDest();
+    };
+    if (!ghOk && !talkOk) $q(".fb-dest").hidden = true;
     $q(".fb-screen").textContent = screen;
     $q(".fb-ver").textContent = `${opts.app} ・ 版 ${opts.version}`;
-    $q(".fb-send").textContent = opts.sendLabel || "GitHub に送る";
+    paintDest();
     if (ctxText) $q(".fb-ctxv").textContent = ctxText; else { $q(".fb-ctxrow").hidden = true; $q(".fb-ctxv").hidden = true; }
     $q(".fb-logv pre").textContent = log || "（記録は無し）";
     if (opts.log === false) { $q(".fb-logrow").hidden = true; $q(".fb-logv").hidden = true; $q(".fb-log").checked = false; }
@@ -326,7 +380,7 @@
       $q(".fb-send").disabled = true;
       $q(".fb-msg").textContent = "送っています…";
       try {
-        const r = await opts.send(payload);
+        const r = await (dest === "talk" ? opts.sendTalk : opts.send)(payload);
         $q(".fb-msg").textContent = "";
         if (r && r.url) {
           const a = document.createElement("a");
