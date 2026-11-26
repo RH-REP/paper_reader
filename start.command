@@ -2,6 +2,11 @@
 # paper_reader の起動口。コードはこのフォルダ（開発側 repo の clone。update.command で pull して
 # 取り込む。直すのは開発側）。設定（config.json）・取り込んだ論文（data/）もこのフォルダ。
 # 初回は .venv を作って pymupdf / pysbd を入れる（ネットが要る）。
+# 起動の前に最新を取り込む（update.command --auto。取り込めなくても今の版で続ける）。取り込んだ新しい start.command で開き直す
+if [[ -z "${APP_START_UPDATED:-}" && -x "${0:A:h}/update.command" ]]; then
+  "${0:A:h}/update.command" --auto
+  [[ -x "${0:A}" ]] && APP_START_UPDATED=1 exec "${0:A}" "$@"
+fi
 set -euo pipefail
 
 export PATH="$HOME/.pyenv/shims:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
